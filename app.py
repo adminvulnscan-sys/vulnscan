@@ -587,6 +587,8 @@ def _aplicar_fila_usuario_a_sesion(datos):
     )
     st.session_state["trial_pro_usada"] = bool(datos.get("trial_pro_usada", False))
     st.session_state["fecha_inicio_trial"] = datos.get("fecha_inicio_trial")
+    st.session_state["tokens_pro"] = int(datos.get("tokens_pro") or 0)
+    st.session_state["tokens_ent"] = int(datos.get("tokens_ent") or 0)
 
 
 def cargar_perfil_usuario(email):
