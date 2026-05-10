@@ -1608,14 +1608,6 @@ with menu_dashboard:
             label_visibility="collapsed"
         )
     
-    with col_dev:
-        with st.expander("🛠️ Simular Webhook (Dev)"):
-            if st.button("➕ Añadir 1 Escaneo Pro"):
-                st.session_state['tokens_pro'] += 1
-                st.rerun()
-            if st.button("➕ Añadir 1 Auditoría OWASP"):
-                st.session_state['tokens_ent'] += 1
-                st.rerun()
 
     if st.session_state['tokens_pro'] > 0 or st.session_state['tokens_ent'] > 0:
         st.info(f"🪙 **Tu Billetera (Pago por uso):** {st.session_state['tokens_pro']} Escaneos Activos disponibles | {st.session_state['tokens_ent']} Auditorías OWASP disponibles")
