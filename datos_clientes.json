@@ -1,0 +1,13 @@
+{
+  "admin@vulnscan.com": {
+    "api_key_real": "723eb531f6072ff22bc66c467fb9f132534e7b764b262a9d49c05c7648c5e7b0",
+    "cancelacion_pendiente": false,
+    "_obj_mes": "2026-05",
+    "_obj_dom_list": [
+      "example.com",
+      "jdsports.es",
+      "google.com",
+      "www.generali.es"
+    ]
+  }
+}

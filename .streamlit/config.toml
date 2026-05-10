@@ -1,0 +1,7 @@
+# Evita cuelgues y recargas infinitas al tener el proyecto en OneDrive / carpetas sincronizadas.
+# https://docs.streamlit.io/develop/concepts/configuration#serverfilewatchertype
+[server]
+fileWatcherType = "none"
+
+[browser]
+gatherUsageStats = false
