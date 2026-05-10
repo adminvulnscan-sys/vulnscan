@@ -1,0 +1,6 @@
+streamlit
+supabase
+stripe
+fpdf
+requests
+python-dotenv
