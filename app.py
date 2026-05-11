@@ -1346,13 +1346,13 @@ with st.sidebar:
     
     # --- 3. CAJAS DE INFORMACIÓN ESTILO ENTERPRISE ---
     if nivel == "Rápido (Passive)":
-        bg_color, border_color, titulo = "rgba(88, 166, 255, 0.1)", "#58a6ff", "🕵️ Escaneo Pasivo (0 rastro)"
+        bg_color, border_color, titulo = "rgba(88, 166, 255, 0.1)", "#58a6ff", " Escaneo Pasivo (0 rastro)"
         desc = "Analiza fuentes públicas (OSINT), registros DNS, caducidad de SSL y reputación de IP. No interactúa de forma agresiva."
     elif nivel == "Profundo (Active)":
-        bg_color, border_color, titulo = "rgba(255, 189, 69, 0.1)", "#FFBD45", "🚀 Escaneo Activo (Intrusivo)"
+        bg_color, border_color, titulo = "rgba(255, 189, 69, 0.1)", "#FFBD45", " Escaneo Activo (Intrusivo)"
         desc = "Interactúa con la infraestructura. Escanea puertos abiertos, busca paneles ocultos y detecta software desactualizado."
     else:
-        bg_color, border_color, titulo = "rgba(255, 75, 75, 0.1)", "#FF4B4B", "🔥 Auditoría OWASP (Completa)"
+        bg_color, border_color, titulo = "rgba(255, 75, 75, 0.1)", "#FF4B4B", " Auditoría OWASP (Completa)"
         desc = "Simula un ataque real. Prueba inyecciones SQL, XSS, bypass de WAF y vulnerabilidades complejas."
 
     st.markdown(f"""
@@ -1423,9 +1423,9 @@ st.markdown("---")
 
 # --- RESTO DE LA PÁGINA ---
 
-# 1. CREAMOS EL MENÚ DE NAVEGACIÓN SUPERIOR (COMO EN LA FOTO)
+# 1. CREAMOS EL MENÚ DE NAVEGACIÓN SUPERIOR 
 menu_dashboard, menu_activos, menu_escaneos, menu_reportes, menu_amenazas, menu_config = st.tabs([
-    "Dashboard", "Mis Activos ", "Escaneos", "Reportes", "Amenazas", "Configuración"
+    "Dashboard", "Mis Activos ", "Precios", "Reportes", "Amenazas", "Configuración"
 ])
 
 # ==========================================
