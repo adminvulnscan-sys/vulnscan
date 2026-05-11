@@ -4,3 +4,4 @@ stripe
 fpdf
 requests
 python-dotenv
+dnspython

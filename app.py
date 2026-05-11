@@ -903,48 +903,117 @@ Nos reservamos el derecho a **actualizar** estos términos. El uso continuado de
 
 # --- MOTOR DE SIMULACIÓN INTELIGENTE (PUNTOS BUENOS Y MALOS) ---
 def simular_escaneo(dominio):
-    valor_unico = sum([ord(letra) for letra in dominio.lower()])
-    
-    criticas = valor_unico % 2        
-    medias = (valor_unico % 4) + 1    
-    ssl_valido = valor_unico % 2 == 0 
-    estado_ssl = "Válido y Vigente" if ssl_valido else "Caducado / Inseguro"
-    
+    import socket
+    import ssl
+    import dns.resolver
+    from datetime import datetime, timezone
+
     puntos_fuertes = []
     vulnerabilidades = []
-    
-    # 🟢 EVALUAMOS LO BUENO
-    if ssl_valido:
-        puntos_fuertes.append("[FORTALEZA] El certificado SSL/TLS esta correctamente configurado, garantizando que el trafico entre el usuario y el servidor viaja cifrado.")
-    
-    if criticas == 0:
-        puntos_fuertes.append("[FORTALEZA] La arquitectura externa es solida. No se han detectado puertos de administracion ni bases de datos expuestos al publico.")
-        
-    posibles_buenos = [
-        "[FORTALEZA] El servidor oculta su huella digital correctamente (no expone la version exacta del software, dificultando ataques dirigidos).",
-        "[FORTALEZA] Se han detectado registros SPF/DMARC en el dominio, protegiendo a la empresa contra el secuestro de correos (phishing spoofing).",
-        "[FORTALEZA] Las cabeceras de los servidores de nombres (DNS) no permiten transferencias de zona publicas (AXFR bloqueado)."
-    ]
-    # Añadimos entre 1 y 2 puntos buenos extra aleatorios según el dominio
-    puntos_fuertes.extend(posibles_buenos[:(valor_unico % 2) + 1])
-    
-    # 🔴 EVALUAMOS LO MALO
-    if not ssl_valido:
-        vulnerabilidades.append("[CRITICA] El certificado SSL presenta anomalias (caducado o autofirmado). Los navegadores bloquearan el acceso a los clientes.")
-        
-    if criticas > 0:
-        vulnerabilidades.append("[CRITICA] Se ha detectado la exposicion publica de servicios sensibles que deberian estar restringidos por un Firewall o VPN.")
-        
-    posibles_medias = [
-        "[AVISO MEDIO] Falta la cabecera de seguridad 'X-Frame-Options'. Esto permite que un atacante incruste la web en un iframe malicioso (Clickjacking).",
-        "[AVISO MEDIO] No se ha detectado la directiva 'Strict-Transport-Security' (HSTS), dejando la puerta abierta a ataques Man-in-the-Middle.",
-        "[AVISO MEDIO] El servidor responde al puerto 80 (HTTP) sin forzar una redireccion estricta hacia HTTPS en el primer contacto."
-    ]
-    vulnerabilidades.extend(posibles_medias[:medias])
+    criticas = 0
+    medias = 0
+
+    # --- 1. SSL REAL ---
+    try:
+        ctx = ssl.create_default_context()
+        with ctx.wrap_socket(socket.socket(), server_hostname=dominio) as s:
+            s.settimeout(5)
+            s.connect((dominio, 443))
+            cert = s.getpeercert()
+        fecha_exp = datetime.strptime(cert['notAfter'], '%b %d %H:%M:%S %Y %Z').replace(tzinfo=timezone.utc)
+        dias_restantes = (fecha_exp - datetime.now(timezone.utc)).days
+        if dias_restantes > 30:
+            estado_ssl = f"Válido y Vigente ({dias_restantes} días restantes)"
+            puntos_fuertes.append(f"[FORTALEZA] El certificado SSL/TLS es válido y caduca en {dias_restantes} días.")
+            ssl_valido = True
+        elif dias_restantes > 0:
+            estado_ssl = f"Próximo a caducar ({dias_restantes} días)"
+            vulnerabilidades.append(f"[AVISO MEDIO] El certificado SSL caduca en {dias_restantes} días. Renuévalo pronto.")
+            medias += 1
+            ssl_valido = True
+        else:
+            estado_ssl = "Caducado"
+            vulnerabilidades.append("[CRITICA] El certificado SSL ha caducado. Los navegadores bloquearán el acceso.")
+            criticas += 1
+            ssl_valido = False
+    except Exception:
+        estado_ssl = "No disponible / Error"
+        vulnerabilidades.append("[CRITICA] No se pudo verificar el certificado SSL. El dominio puede no tener HTTPS configurado.")
+        criticas += 1
+        ssl_valido = False
+
+    # --- 2. CABECERAS HTTP REALES ---
+    try:
+        r = requests.get(f"https://{dominio}", timeout=5, allow_redirects=True)
+        headers = {k.lower(): v for k, v in r.headers.items()}
+
+        if 'x-frame-options' not in headers:
+            vulnerabilidades.append("[AVISO MEDIO] Falta la cabecera 'X-Frame-Options'. Permite ataques de Clickjacking.")
+            medias += 1
+        else:
+            puntos_fuertes.append("[FORTALEZA] Cabecera X-Frame-Options presente. Protegido contra Clickjacking.")
+
+        if 'strict-transport-security' not in headers:
+            vulnerabilidades.append("[AVISO MEDIO] Falta la cabecera HSTS. Vulnerable a ataques Man-in-the-Middle.")
+            medias += 1
+        else:
+            puntos_fuertes.append("[FORTALEZA] HSTS activo. Conexiones siempre forzadas a HTTPS.")
+
+        if 'content-security-policy' not in headers:
+            vulnerabilidades.append("[AVISO MEDIO] Falta Content-Security-Policy. Mayor riesgo de XSS.")
+            medias += 1
+        else:
+            puntos_fuertes.append("[FORTALEZA] Content-Security-Policy presente. Protección contra XSS activa.")
+
+        if 'server' in headers:
+            vulnerabilidades.append(f"[AVISO MEDIO] El servidor expone su versión: '{headers['server']}'. Facilita ataques dirigidos.")
+            medias += 1
+        else:
+            puntos_fuertes.append("[FORTALEZA] El servidor oculta su versión correctamente.")
+
+    except Exception:
+        vulnerabilidades.append("[AVISO MEDIO] No se pudo conectar por HTTPS para analizar cabeceras.")
+        medias += 1
+
+    # --- 3. DNS REAL ---
+    try:
+        dns.resolver.resolve(dominio, 'A')
+        puntos_fuertes.append("[FORTALEZA] Registros DNS A correctamente configurados.")
+    except Exception:
+        vulnerabilidades.append("[CRITICA] No se encontraron registros DNS A para este dominio.")
+        criticas += 1
+
+    try:
+        dns.resolver.resolve(dominio, 'MX')
+        puntos_fuertes.append("[FORTALEZA] Registros MX presentes. Correo corporativo configurado.")
+    except Exception:
+        pass
+
+    try:
+        spf = dns.resolver.resolve(dominio, 'TXT')
+        spf_found = any('v=spf1' in str(r) for r in spf)
+        if spf_found:
+            puntos_fuertes.append("[FORTALEZA] Registro SPF presente. Protegido contra email spoofing.")
+        else:
+            vulnerabilidades.append("[AVISO MEDIO] No se detectó registro SPF. Riesgo de suplantación de correo.")
+            medias += 1
+    except Exception:
+        pass
+
+    # --- 4. REPUTACIÓN IP ---
+    try:
+        ip = socket.gethostbyname(dominio)
+        rep = requests.get(f"http://ip-api.com/json/{ip}", timeout=5).json()
+        if rep.get('status') == 'success':
+            pais = rep.get('country', 'Desconocido')
+            org = rep.get('org', 'Desconocida')
+            puntos_fuertes.append(f"[INFO] IP: {ip} | País: {pais} | Organización: {org}")
+    except Exception:
+        pass
 
     return {
-        "criticas": criticas, 
-        "medias": medias, 
+        "criticas": criticas,
+        "medias": medias,
         "ssl": estado_ssl,
         "puntos_ssl": 1 if ssl_valido else 0,
         "buenos": puntos_fuertes,
