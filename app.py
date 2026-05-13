@@ -111,11 +111,12 @@ def _motor_basic_pasivo(dominio_limpio):
 
 
 def _motor_pro_activo(dominio_limpio, incluir_cve_matching):
-    """Mapeo de puertos (socket), fuzzing de directorios web (requests) y CVE matching opcional."""
+    """Mapeo de puertos con banner grabbing, fuzzing ampliado y CVE matching por software detectado."""
     resultados_reales = []
     puertos_web_abiertos = False
+    software_detectado = []
 
-    # --- Mapeo de puertos (solo Pro+ en modo Activo, o Enterprise OWASP) ---
+    # --- Mapeo de puertos + Banner Grabbing ---
     puertos_clave = {80: "HTTP (Sin cifrar)", 443: "HTTPS (Seguro)"}
     for puerto, desc in puertos_clave.items():
         try:
@@ -124,20 +125,42 @@ def _motor_pro_activo(dominio_limpio, incluir_cve_matching):
             if s.connect_ex((dominio_limpio, puerto)) == 0:
                 puertos_web_abiertos = True
                 resultados_reales.append(f"🟢 **Puerto {puerto} Abierto:** {desc}")
+                # Banner Grabbing
+                try:
+                    s.send(b"HEAD / HTTP/1.0\r\nHost: " + dominio_limpio.encode() + b"\r\n\r\n")
+                    banner = s.recv(1024).decode(errors="ignore")
+                    # Extraer servidor del banner
+                    for linea in banner.split("\n"):
+                        if linea.lower().startswith("server:"):
+                            servidor = linea.split(":", 1)[1].strip()
+                            resultados_reales.append(f"🔍 **Banner Puerto {puerto}:** {servidor}")
+                            software_detectado.append(servidor)
+                            break
+                except Exception:
+                    pass
             else:
                 resultados_reales.append(f"🔴 **Puerto {puerto} Cerrado:** {desc}")
             s.close()
         except Exception:
             pass
 
-    # --- Fuzzing de directorios web ---
+    # --- Fuzzing de directorios web (ampliado) ---
     rutas_comunes = [
-        "/admin",
-        "/login",
-        "/wp-admin",
-        "/api",
-        "/backup",
-        "/.env",
+        "/admin", "/login", "/wp-admin", "/api", "/backup", "/.env",
+        "/wp-login.php", "/administrator", "/phpmyadmin", "/cpanel",
+        "/dashboard", "/panel", "/manager", "/console", "/portal",
+        "/config", "/configuration", "/setup", "/install", "/database",
+        "/.git", "/.svn", "/.htaccess", "/web.config", "/robots.txt",
+        "/sitemap.xml", "/xmlrpc.php", "/wp-config.php", "/readme.html",
+        "/license.txt", "/changelog.txt", "/upload", "/uploads", "/files",
+        "/images", "/static", "/assets", "/tmp", "/temp", "/cache",
+        "/logs", "/log", "/error_log", "/access_log", "/debug",
+        "/api/v1", "/api/v2", "/api/users", "/api/admin", "/graphql",
+        "/swagger", "/swagger-ui.html", "/api-docs", "/redoc", "/openapi.json",
+        "/shell", "/cmd", "/exec", "/eval", "/test", "/dev", "/staging",
+        "/old", "/bak", "/backup.zip", "/backup.sql", "/db.sql",
+        "/info.php", "/phpinfo.php", "/server-status", "/server-info",
+        "/.well-known", "/security.txt", "/crossdomain.xml", "/clientaccesspolicy.xml"
     ]
     headers_pro = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0"
@@ -147,20 +170,131 @@ def _motor_pro_activo(dominio_limpio, incluir_cve_matching):
         try:
             r = requests.head(f"{base}{path}", timeout=2.5, headers=headers_pro, allow_redirects=True)
             if r.status_code in (200, 301, 302, 401, 403):
+                # Clasificar por severidad
+                if path in ["/.env", "/wp-config.php", "/.git", "/backup.zip", "/backup.sql", "/db.sql"]:
+                    emoji = "🚨"
+                elif path in ["/admin", "/wp-admin", "/phpmyadmin", "/cpanel", "/shell", "/cmd"]:
+                    emoji = "⚠️"
+                else:
+                    emoji = "📂"
                 resultados_reales.append(
-                    f"📂 **Fuzzing web:** Respuesta relevante ({r.status_code}) → `{path}`"
+                    f"{emoji} **Fuzzing web:** Respuesta ({r.status_code}) → `{path}`"
                 )
         except Exception:
             pass
 
+    # --- CVE Matching por software detectado en banner ---
     if incluir_cve_matching and puertos_web_abiertos:
-        resultados_reales.append(
-            "📋 **CVE Matching:** Cruce automático con bases de datos NVD/MITRE."
-        )
-        resultados_reales.append(
-            "🚨 **CVE / Vector:** Analizando vulnerabilidades específicas de los servicios web detectados..."
-        )
+        keywords = software_detectado if software_detectado else [dominio_limpio]
+        for keyword in keywords[:2]:  # Máximo 2 búsquedas para no saturar la API
+            try:
+                nvd_key = os.getenv("NVD_API_KEY", "")
+                headers_nvd = {"apiKey": nvd_key} if nvd_key else {}
+                r_nvd = requests.get(
+                    "https://services.nvd.nist.gov/rest/json/cves/2.0",
+                    params={"keywordSearch": keyword, "resultsPerPage": 5},
+                    headers=headers_nvd,
+                    timeout=10
+                )
+                if r_nvd.status_code == 200:
+                    cves = r_nvd.json().get("vulnerabilities", [])
+                    if cves:
+                        for cve in cves[:3]:
+                            cve_id = cve["cve"]["id"]
+                            desc = cve["cve"]["descriptions"][0]["value"][:120]
+                            # Extraer severidad CVSS si existe
+                            try:
+                                severidad = cve["cve"]["metrics"]["cvssMetricV31"][0]["cvssData"]["baseSeverity"]
+                            except Exception:
+                                severidad = "UNKNOWN"
+                            emoji_sev = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡", "LOW": "🟢"}.get(severidad, "⚪")
+                            resultados_reales.append(
+                                f"🚨 **CVE [{emoji_sev}{severidad}]:** {cve_id} ({keyword}) — {desc}..."
+                            )
+                    else:
+                        resultados_reales.append(f"📋 **CVE Matching ({keyword}):** No se encontraron CVEs conocidos.")
+                else:
+                    resultados_reales.append("📋 **CVE Matching:** No se pudo conectar con NVD/MITRE.")
+            except Exception as e:
+                resultados_reales.append(f"📋 **CVE Matching:** Error al consultar NVD: {str(e)[:50]}")
 
+# --- Detección de tecnologías web ---
+    try:
+        r_tech = requests.get(f"https://{dominio_limpio}", timeout=5, headers=headers_pro)
+        html = r_tech.text.lower()
+        headers_resp = {k.lower(): v.lower() for k, v in r_tech.headers.items()}
+        tecnologias = []
+
+        # CMS
+        if "wp-content" in html or "wp-includes" in html:
+            tecnologias.append("WordPress")
+        if "drupal" in html or "sites/default" in html:
+            tecnologias.append("Drupal")
+        if "joomla" in html:
+            tecnologias.append("Joomla")
+        if "shopify" in html:
+            tecnologias.append("Shopify")
+        if "wix.com" in html:
+            tecnologias.append("Wix")
+
+        # Frameworks
+        if "laravel" in html or "laravel_session" in str(r_tech.cookies):
+            tecnologias.append("Laravel")
+        if "django" in html or "csrfmiddlewaretoken" in html:
+            tecnologias.append("Django")
+        if "next.js" in html or "__next" in html:
+            tecnologias.append("Next.js")
+        if "react" in html or "react-dom" in html:
+            tecnologias.append("React")
+        if "vue.js" in html or "vuejs" in html:
+            tecnologias.append("Vue.js")
+        if "angular" in html:
+            tecnologias.append("Angular")
+
+        # Servidores
+        if "nginx" in headers_resp.get("server", ""):
+            tecnologias.append("Nginx")
+        if "apache" in headers_resp.get("server", ""):
+            tecnologias.append("Apache")
+        if "cloudflare" in headers_resp.get("server", "") or "cloudflare" in headers_resp.get("cf-ray", ""):
+            tecnologias.append("Cloudflare CDN")
+
+        # Analytics
+        if "google-analytics" in html or "gtag" in html:
+            tecnologias.append("Google Analytics")
+        if "hotjar" in html:
+            tecnologias.append("Hotjar")
+
+        if tecnologias:
+            resultados_reales.append(f"🛠️ **Tecnologías detectadas:** {', '.join(tecnologias)}")
+        else:
+            resultados_reales.append("🛠️ **Tecnologías:** No se identificaron tecnologías conocidas.")
+
+    except Exception:
+        pass
+
+    # --- Subdominios comunes ---
+    subdominios_comunes = [
+        "www", "mail", "ftp", "api", "dev", "staging", "test",
+        "admin", "portal", "app", "cdn", "static", "media",
+        "blog", "shop", "store", "vpn", "remote", "webmail",
+        "smtp", "pop", "imap", "ns1", "ns2", "mx", "support"
+    ]
+    subdominios_encontrados = []
+    for sub in subdominios_comunes:
+        try:
+            socket.gethostbyname(f"{sub}.{dominio_limpio}")
+            subdominios_encontrados.append(f"{sub}.{dominio_limpio}")
+        except Exception:
+            pass
+
+    if subdominios_encontrados:
+        resultados_reales.append(f"🌐 **Subdominios detectados:** {', '.join(subdominios_encontrados)}")
+        if any(s in subdominios_encontrados for s in [f"dev.{dominio_limpio}", f"staging.{dominio_limpio}", f"test.{dominio_limpio}"]):
+            resultados_reales.append("⚠️ **Alerta:** Se detectaron subdominios de desarrollo/staging expuestos públicamente.")
+    else:
+        resultados_reales.append("🌐 **Subdominios:** No se detectaron subdominios comunes expuestos.")
+        
     return resultados_reales
 
 
@@ -589,7 +723,13 @@ def _aplicar_fila_usuario_a_sesion(datos):
     st.session_state["fecha_inicio_trial"] = datos.get("fecha_inicio_trial")
     st.session_state["tokens_pro"] = int(datos.get("tokens_pro") or 0)
     st.session_state["tokens_ent"] = int(datos.get("tokens_ent") or 0)
-
+    try:
+            verificados = supabase.table("activos_verificados").select("dominio").eq("email_cliente", datos.get("email", "")).execute()
+            st.session_state["dominios_verificados"] = [r["dominio"] for r in verificados.data]
+            print(f"[DEBUG] dominios cargados: {st.session_state['dominios_verificados']}")
+    except Exception:
+        st.session_state["dominios_verificados"] = []
+        print(f"[DEBUG dominios_verificados] Error: {Exception}")
 
 def cargar_perfil_usuario(email):
     if not email:
@@ -936,7 +1076,7 @@ def crear_pdf(dominio, resultados):
     crit_count = sum(1 for r in resultados if "🔴" in r or "🚨" in r)
     med_count = sum(1 for r in resultados if "⚠️" in r or "🟡" in r)
     
-    puntos_a_restar = (crit_count * 45) + (med_count * 5)
+    puntos_a_restar = (crit_count * 15) + (med_count * 7)
     nota_final = max(5, min(100, 100 - puntos_a_restar))
     
     if nota_final >= 80: nivel_riesgo = "Optimo (Bajo Riesgo)"
@@ -1856,7 +1996,7 @@ with menu_dashboard:
                 med_count = sum(1 for r in resultados if "⚠️" in r or "🟡" in r or "Vulnerabilidad Media" in r)
                 
                 # 2. Nueva lógica de puntos: Media solo resta 5
-                puntos_a_restar = (crit_count * 40) + (med_count * 10)
+                puntos_a_restar = (crit_count * 15) + (med_count * 7)
                 nota_final = 100 - puntos_a_restar
                 
                 # 3. Resultado final para el círculo
