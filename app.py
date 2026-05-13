@@ -1276,7 +1276,7 @@ def crear_pdf(dominio, resultados):
     aciertos = [r for r in resultados if "🟢" in r or "✅" in r]
     if aciertos:
         for bueno in aciertos:
-            texto_limpio = bueno.replace('🟢', '[OK]').replace('✅', '[OK]')
+            texto_limpio = bueno.replace('🟢', '[OK]').replace('✅', '[OK]').replace('**', '').replace('`', '')
             pdf.multi_cell(0, 6, texto_limpio)
             pdf.ln(3)
     else:
