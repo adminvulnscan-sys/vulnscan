@@ -107,6 +107,60 @@ def _motor_basic_pasivo(dominio_limpio):
     except Exception as e:
         resultados_reales.append(f"❌ No se pudieron analizar las cabeceras: {e}")
 
+# --- SSL Real ---
+    try:
+        import ssl
+        from datetime import datetime, timezone
+        ctx = ssl.create_default_context()
+        with ctx.wrap_socket(socket.socket(), server_hostname=dominio_limpio) as s:
+            s.settimeout(5)
+            s.connect((dominio_limpio, 443))
+            cert = s.getpeercert()
+        fecha_exp = datetime.strptime(cert['notAfter'], '%b %d %H:%M:%S %Y %Z').replace(tzinfo=timezone.utc)
+        dias_restantes = (fecha_exp - datetime.now(timezone.utc)).days
+        if dias_restantes > 30:
+            resultados_reales.append(f"✅ **SSL/TLS:** Certificado válido — caduca en {dias_restantes} días.")
+        elif dias_restantes > 0:
+            resultados_reales.append(f"⚠️ **SSL/TLS:** Certificado próximo a caducar — {dias_restantes} días restantes.")
+        else:
+            resultados_reales.append(f"🚨 **SSL/TLS:** Certificado CADUCADO.")
+    except Exception:
+        resultados_reales.append("🚨 **SSL/TLS:** No se pudo verificar el certificado.")
+
+    # --- Detección de CDN ---
+    try:
+        headers_cdn = requests.get(f"https://{dominio_limpio}", timeout=5).headers
+        if "cf-ray" in [h.lower() for h in headers_cdn]:
+            resultados_reales.append("🛡️ **CDN:** Cloudflare detectado — tráfico protegido por CDN.")
+        elif "x-amz-cf-id" in [h.lower() for h in headers_cdn]:
+            resultados_reales.append("🛡️ **CDN:** Amazon CloudFront detectado.")
+        elif "x-azure-ref" in [h.lower() for h in headers_cdn]:
+            resultados_reales.append("🛡️ **CDN:** Azure CDN detectado.")
+        elif "x-cache" in [h.lower() for h in headers_cdn] and "akamai" in str(headers_cdn).lower():
+            resultados_reales.append("🛡️ **CDN:** Akamai detectado.")
+        else:
+            resultados_reales.append("ℹ️ **CDN:** No se detectó CDN conocido.")
+    except Exception:
+        pass
+
+    # --- Listas negras de spam ---
+    try:
+        ip = socket.gethostbyname(dominio_limpio)
+        ip_inv = ".".join(reversed(ip.split(".")))
+        dnsbl_listas = ["zen.spamhaus.org", "bl.spamcop.net", "dnsbl.sorbs.net"]
+        en_lista_negra = False
+        for lista in dnsbl_listas:
+            try:
+                socket.gethostbyname(f"{ip_inv}.{lista}")
+                resultados_reales.append(f"🚨 **Lista Negra:** IP {ip} encontrada en {lista}.")
+                en_lista_negra = True
+            except Exception:
+                pass
+        if not en_lista_negra:
+            resultados_reales.append(f"✅ **Reputación IP:** {ip} no aparece en listas negras de spam.")
+    except Exception:
+        pass
+
     return resultados_reales
 
 
@@ -294,7 +348,7 @@ def _motor_pro_activo(dominio_limpio, incluir_cve_matching):
             resultados_reales.append("⚠️ **Alerta:** Se detectaron subdominios de desarrollo/staging expuestos públicamente.")
     else:
         resultados_reales.append("🌐 **Subdominios:** No se detectaron subdominios comunes expuestos.")
-        
+
     return resultados_reales
 
 
@@ -1065,6 +1119,7 @@ class ReportePDF(FPDF):
             self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
 def crear_pdf(dominio, resultados):
+    resultados = [r.replace('\u2014', '-').replace('\u2013', '-').replace('\u2019', "'").replace('\u201c', '"').replace('\u201d', '"') for r in resultados]
     # --- FIX DUPLICADOS: Eliminamos cualquier resultado repetido ---
     resultados_unicos = []
     for r in resultados:
@@ -1268,7 +1323,7 @@ def crear_pdf(dominio, resultados):
     )
     pdf.multi_cell(0, 5, legal_text)
     
-    return pdf.output(dest='S').encode('latin-1')
+    return pdf.output(dest='S').encode('latin-1', errors='replace')
 
 # --- FUNCIONES DE VERIFICACIÓN LEGAL ---
 
