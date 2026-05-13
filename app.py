@@ -877,6 +877,8 @@ def _aplicar_fila_usuario_a_sesion(datos):
     st.session_state["fecha_inicio_trial"] = datos.get("fecha_inicio_trial")
     st.session_state["tokens_pro"] = int(datos.get("tokens_pro") or 0)
     st.session_state["tokens_ent"] = int(datos.get("tokens_ent") or 0)
+    st.session_state["tokens_pdf"] = int(datos.get("tokens_pdf") or 0)
+    st.session_state["reporte_pdf_desbloqueado"] = datos.get("reporte_pdf_desbloqueado", None)
     try:
             verificados = supabase.table("activos_verificados").select("dominio").eq("email_cliente", datos.get("email", "")).execute()
             st.session_state["dominios_verificados"] = [r["dominio"] for r in verificados.data]
@@ -1027,6 +1029,15 @@ if not st.session_state['usuario_autenticado']:
 
     if _query_param_terms_activo():
         st.session_state["mostrar_terminos"] = True
+
+    # Detectar vuelta de Stripe con pago exitoso
+    pago_param = st.query_params.get("pago")
+    if pago_param == "exitoso":
+        email_recarga = st.session_state.get("email_usuario", "")
+        if email_recarga:
+            cargar_perfil_usuario(email_recarga)
+        st.query_params.clear()
+        st.success("✅ Pago completado. Ya puedes descargar tu reporte.")
 
     if st.session_state.get("mostrar_terminos"):
         st.markdown("<br>", unsafe_allow_html=True)
@@ -2033,6 +2044,22 @@ with menu_dashboard:
             st.warning("⚠️ Escribe un dominio primero para poder iniciar el escaneo.")
 
     # --- RESULTADOS Y DESCARGA DE PDF ---
+    # --- Recuperar último escaneo desde Supabase si se perdió por redirección de Stripe ---
+    if 'resultados_actuales' not in st.session_state:
+        try:
+            email_recuperar = st.session_state.get("email_usuario", "")
+            print(f"[DEBUG recuperar escaneo] email: {email_recuperar}")
+            if email_recuperar:
+                ultimo = supabase.table("escaneos").select("*").eq("email_cliente", email_recuperar).limit(1).execute()               
+                if ultimo.data:
+                    r = ultimo.data[0]
+                    st.session_state['resultados_actuales'] = json.loads(r.get("resultados_json", "[]"))
+                    st.session_state['dominio_actual'] = r.get("dominio", "")
+                    st.session_state['nivel_escaneo_guardado'] = r.get("tipo", "Rápido (Passive)")
+        except Exception as e:
+            print(f"[DEBUG recuperar escaneo] Error: {e}")
+            pass
+
     if 'resultados_actuales' not in st.session_state:
         icono_estado = (
             f'<img src="data:image/png;base64,{logo_b64}" style="width:72px; height:auto; margin-bottom:10px;">'
@@ -2046,7 +2073,6 @@ with menu_dashboard:
                 </p>
             </div>
         """, unsafe_allow_html=True)
-
     if 'resultados_actuales' in st.session_state:
         resultados = st.session_state['resultados_actuales']
         dominio_escaneado = st.session_state['dominio_actual']
@@ -2059,8 +2085,8 @@ with menu_dashboard:
 
         # LÓGICA MAESTRA: ¿Le damos el PDF?
         # SÍ, si su plan es Pro/Enterprise. O SÍ, si el escaneo que acaba de hacer era un escaneo de pago (usó un token).
-        tiene_derecho_pdf = plan_actual in ['Pro', 'Enterprise'] or nivel_usado in ["Profundo (Active)", "Auditoría Completa (OWASP)"]
-
+        tokens_pdf = st.session_state.get("tokens_pdf", 0)
+        tiene_derecho_pdf = plan_actual in ['Pro', 'Enterprise'] or nivel_usado in ["Profundo (Active)", "Auditoría Completa (OWASP)"] or tokens_pdf > 0
         if not tiene_derecho_pdf:
             st.button("🔒 Descargar Reporte en PDF (Pro)", use_container_width=True, disabled=True)
             st.error("🔒 **Función Premium.** Necesitas el Plan Pro para exportar un escaneo Pasivo en formato ejecutivo.")
@@ -2096,16 +2122,33 @@ with menu_dashboard:
         else:
             st.success("Reporte generado correctamente. Ya puedes descargarlo.")
             pdf_generado = crear_pdf(dominio_escaneado, resultados)
-            
-            st.download_button(
-                label="⬇️ Descargar Reporte Ejecutivo (.pdf)",
-                data=pdf_generado,
-                file_name=f"Auditoria_{dominio_escaneado.replace('.', '_')}.pdf",
-                mime="application/pdf",
-                use_container_width=True,
-                type="primary"
-            )
+            email_pago = st.session_state.get("email_usuario", "")
 
+            if not st.session_state.get("token_pdf_descontado"):
+                if st.download_button(
+                    label="⬇️ Descargar Reporte Ejecutivo (.pdf)",
+                    data=pdf_generado,
+                    file_name=f"Auditoria_{dominio_escaneado.replace('.', '_')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                    type="primary"
+                ):
+                    if tokens_pdf > 0 and plan_actual not in ('Pro', 'Enterprise'):
+                        actualizar_usuario_supabase(email_pago, "tokens_pdf", tokens_pdf - 1)
+                        st.session_state["tokens_pdf"] = tokens_pdf - 1
+                        st.session_state["token_pdf_descontado"] = True
+            else:
+                st.download_button(
+                    label="⬇️ Descargar Reporte Ejecutivo (.pdf)",
+                    data=pdf_generado,
+                    file_name=f"Auditoria_{dominio_escaneado.replace('.', '_')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                    type="primary"
+                )
+                if tokens_pdf > 0 and plan_actual not in ('Pro', 'Enterprise'):
+                    actualizar_usuario_supabase(email_pago, "tokens_pdf", tokens_pdf - 1)
+                    st.session_state["tokens_pdf"] = tokens_pdf - 1
         st.markdown("---")
         tab_resumen, tab_plan_accion = st.tabs(["📊 Resumen", "💡 Plan de Acción"])
         
@@ -2734,33 +2777,45 @@ with menu_reportes:
                     st.markdown(f"**{dominio}** - {tipo}")
                     st.caption(f"📅 Fecha: {fecha} | Nivel de Riesgo: {riesgo}")
                 with rc2:
-                      if plan_rep in ['Pro', 'Enterprise']:
-                        resultados_rep = rep.get('resultados', [])
-                        if not resultados_rep:
-                            resultados_rep = [f"✅ Dominio analizado: {dominio}", f"📅 Fecha: {fecha}", f"⚠️ Nivel de riesgo: {riesgo}"]
-                        pdf_bytes = crear_pdf(dominio, resultados_rep)
-                        st.download_button(
-                            label="📄 Descargar Reporte PDF",
-                            data=pdf_bytes,
-                            file_name=f"reporte_{dominio}.pdf",
-                            mime="application/pdf",
-                            key=f"dl_pdf_{sufijo}_{index}",
-                            use_container_width=True,
-                            type="primary"
-                        )
-                      else:
-                        if st.button("📄 Descargar Reporte PDF", key=f"btn_pdf_{sufijo}_{index}", use_container_width=True):
-                            st.session_state[f"mostrar_upsell_{sufijo}_{index}"] = True
-                        if st.session_state.get(f"mostrar_upsell_{sufijo}_{index}"):
-                            st.warning("🔒 Para descargar el reporte PDF necesitas el **Plan Pro** o **Enterprise**, también puedes comprarlo por **9,99€**.")
-                            email_pago = st.session_state.get("email_usuario", "")
-                            try:
-                                url_pdf = generar_link_pago(
-                                    STRIPE_PRICES["pdf_unico"], email_pago, "pdf_unico", "payment"
-                                )
-                                st.link_button("🛒 Comprar por 9,99€", url=url_pdf, use_container_width=True)
-                            except Exception as e:
-                                st.error(f"Error al generar el enlace: {e}")
+                        plan_rep = st.session_state.get("plan_activo", "Basic")
+                        tokens_pdf = st.session_state.get("tokens_pdf", 0)
+                        email_pago = st.session_state.get("email_usuario", "")
+
+                        reporte_id = str(rep.get('id', f"{dominio}_{fecha}_{index}"))
+                        token_usado_key = f"token_usado_{reporte_id}"
+
+                        reporte_desbloqueado = st.session_state.get("reporte_pdf_desbloqueado", None)
+                        if plan_rep in ['Pro', 'Enterprise'] or reporte_desbloqueado == reporte_id:
+                            resultados_rep = rep.get('resultados', [])
+                            if not resultados_rep:
+                                resultados_rep = [f"✅ Dominio analizado: {dominio}", f"📅 Fecha: {fecha}", f"⚠️ Nivel de riesgo: {riesgo}"]
+                            pdf_bytes = crear_pdf(dominio, resultados_rep)
+                            if st.download_button(
+                                label="📄 Descargar Reporte PDF",
+                                data=pdf_bytes,
+                                file_name=f"reporte_{dominio}.pdf",
+                                mime="application/pdf",
+                                key=f"dl_pdf_{sufijo}_{index}",
+                                use_container_width=True,
+                                type="primary"
+                            ):
+                                if tokens_pdf > 0 and plan_rep not in ('Pro', 'Enterprise'):
+                                    actualizar_usuario_supabase(email_pago, "tokens_pdf", tokens_pdf - 1)
+                                    st.session_state["tokens_pdf"] = tokens_pdf - 1
+                                    st.session_state[token_usado_key] = True
+                        else:
+                            if st.button("📄 Descargar Reporte PDF", key=f"btn_pdf_{sufijo}_{index}", use_container_width=True):
+                                st.session_state[f"mostrar_upsell_{sufijo}_{index}"] = True
+                            if st.session_state.get(f"mostrar_upsell_{sufijo}_{index}"):
+                                st.warning("🔒 Para descargar el reporte PDF necesitas el **Plan Pro** o **Enterprise**, también puedes comprarlo por **9,99€**.")
+                                try:
+                                    st.session_state[f"reporte_desbloqueado_{sufijo}"] = reporte_id
+                                    actualizar_usuario_supabase(email_pago, "reporte_pdf_desbloqueado", reporte_id)
+                                    st.session_state["reporte_pdf_desbloqueado"] = reporte_id
+                                    url_pdf = generar_link_pago(STRIPE_PRICES["pdf_unico"], email_pago, "pdf_unico", "payment")
+                                    st.link_button("🛒 Comprar por 9,99€", url=url_pdf, use_container_width=True)
+                                except Exception as e:
+                                    st.error(f"Error al generar el enlace: {e}")
                 st.markdown("</div>", unsafe_allow_html=True)
 
         with sub_tab_recientes:
