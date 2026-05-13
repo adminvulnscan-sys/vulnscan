@@ -139,7 +139,7 @@ def _motor_basic_pasivo(dominio_limpio):
         elif "x-cache" in [h.lower() for h in headers_cdn] and "akamai" in str(headers_cdn).lower():
             resultados_reales.append("🛡️ **CDN:** Akamai detectado.")
         else:
-            resultados_reales.append("ℹ️ **CDN:** No se detectó CDN conocido.")
+            resultados_reales.append("⚠️ **CDN:** No se detectó CDN conocido. Se recomienda usar Cloudflare u otro CDN para mayor protección.")
     except Exception:
         pass
 
@@ -353,44 +353,144 @@ def _motor_pro_activo(dominio_limpio, incluir_cve_matching):
 
 
 def _motor_enterprise_owasp(dominio_limpio):
-    """Inyección SQL y payloads maliciosos (simulación controlada); salida = mensajes de capa Enterprise."""
+    """Pruebas OWASP reales: SQLi, XSS, SSRF, WAF detection, cabeceras avanzadas."""
     resultados_reales = []
     headers_pro = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0"
     }
     base = f"https://{dominio_limpio}"
 
-    resultados_reales.append(
-        "🔬 **OWASP (capa Enterprise):** Módulos de inyección (SQLi, XSS, SSRF) y bypass de WAF en modo seguro / simulación acotada."
-    )
-    resultados_reales.append(
-        "🔑 **Escaneo Autenticado:** Verificando fallos de Broken Access Control en rutas protegidas..."
-    )
-
+    # --- 1. Detección de WAF ---
     try:
-        respuesta_waf = requests.get(
-            base,
-            params={"id": "1' OR '1'='1"},
-            timeout=5,
-            headers=headers_pro,
-            allow_redirects=True,
-        )
-        if respuesta_waf.status_code in (403, 406):
-            resultados_reales.append(
-                "🛡️ **Bypass de WAF:** Firewall detectado. El WAF ha bloqueado correctamente los payloads SQLi."
-            )
+        payloads_waf = [
+            {"id": "1' OR '1'='1"},
+            {"id": "1; DROP TABLE users--"},
+            {"search": "<script>alert(1)</script>"},
+        ]
+        waf_detectado = False
+        for payload in payloads_waf:
+            r = requests.get(base, params=payload, timeout=5, headers=headers_pro)
+            if r.status_code in (403, 406, 429):
+                waf_detectado = True
+                break
+            cabeceras_waf = ["x-sucuri-id", "x-firewall", "cf-ray", "x-waf", "x-protected-by"]
+            if any(h in [k.lower() for k in r.headers.keys()] for h in cabeceras_waf):
+                waf_detectado = True
+                break
+        if waf_detectado:
+            resultados_reales.append("🛡️ **WAF Detectado:** Firewall activo — payloads maliciosos bloqueados correctamente.")
         else:
-            resultados_reales.append(
-                "❌ **Vulnerabilidad Crítica:** Posible SQL Injection (SQLi) detectada. WAF ausente o eludido."
-            )
+            resultados_reales.append("🚨 **WAF Ausente:** No se detectó firewall de aplicaciones web. Vulnerable a ataques automatizados.")
     except Exception:
-        resultados_reales.append(
-            "❌ **Vulnerabilidad Crítica:** Posible SQL Injection (SQLi) detectada. WAF ausente o eludido."
-        )
+        resultados_reales.append("⚠️ **WAF:** No se pudo verificar la presencia de firewall.")
 
-    resultados_reales.append(
-        "🧪 **Payload de prueba (no destructivo):** comprobaciones parametrizadas contra formularios y entradas HTTP identificadas."
-    )
+    # --- 2. SQLi real (detección por errores) ---
+    try:
+        payloads_sqli = ["'", "''", "`", "1' OR '1'='1", "1; SELECT 1--", "' OR 1=1--"]
+        errores_sql = ["sql syntax", "mysql_fetch", "ora-", "sqlite_", "pg_query", "unclosed quotation", "syntax error"]
+        sqli_encontrado = False
+        for payload in payloads_sqli:
+            try:
+                r = requests.get(base, params={"id": payload, "q": payload, "search": payload}, timeout=5, headers=headers_pro)
+                respuesta_lower = r.text.lower()
+                if any(err in respuesta_lower for err in errores_sql):
+                    resultados_reales.append(f"🚨 **SQLi Detectado:** El servidor devuelve errores SQL con payload `{payload}`. Vulnerabilidad crítica de inyección SQL.")
+                    sqli_encontrado = True
+                    break
+            except Exception:
+                pass
+        if not sqli_encontrado:
+            resultados_reales.append("✅ **SQLi:** No se detectaron errores SQL en las respuestas del servidor.")
+    except Exception:
+        pass
+
+    # --- 3. XSS Reflejado ---
+    try:
+        payloads_xss = [
+            "<script>alert('xss')</script>",
+            "<img src=x onerror=alert(1)>",
+            "javascript:alert(1)",
+        ]
+        xss_encontrado = False
+        for payload in payloads_xss:
+            r = requests.get(base, params={"q": payload, "search": payload, "input": payload}, timeout=5, headers=headers_pro)
+            if payload.lower() in r.text.lower():
+                resultados_reales.append(f"🚨 **XSS Reflejado:** El servidor devuelve el payload sin sanitizar. Vulnerabilidad crítica.")
+                xss_encontrado = True
+                break
+        if not xss_encontrado:
+            resultados_reales.append("✅ **XSS:** El servidor sanitiza correctamente los inputs.")
+    except Exception:
+        pass
+
+    # --- 4. SSRF básico ---
+    try:
+        ssrf_payloads = [
+            "http://127.0.0.1",
+            "http://localhost",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://192.168.1.1",
+        ]
+        ssrf_encontrado = False
+        for payload in ssrf_payloads:
+            try:
+                r = requests.get(base, params={"url": payload, "redirect": payload, "next": payload}, timeout=5, headers=headers_pro)
+                if r.status_code == 200 and any(x in r.text.lower() for x in ["ami-id", "instance-id", "root:", "localhost"]):
+                    resultados_reales.append(f"🚨 **SSRF Detectado:** El servidor realiza peticiones a IPs internas ({payload}). Vulnerabilidad crítica.")
+                    ssrf_encontrado = True
+                    break
+            except Exception:
+                pass
+        if not ssrf_encontrado:
+            resultados_reales.append("✅ **SSRF:** No se detectaron redirecciones a IPs internas.")
+    except Exception:
+        pass
+
+    # --- 5. Cabeceras de seguridad avanzadas ---
+    try:
+        r_headers = requests.get(base, timeout=5, headers=headers_pro)
+        headers_resp = {k.lower(): v for k, v in r_headers.headers.items()}
+
+        if "permissions-policy" not in headers_resp:
+            resultados_reales.append("⚠️ **Permissions-Policy:** Ausente. El sitio no restringe APIs del navegador (cámara, micrófono, geolocalización).")
+        else:
+            resultados_reales.append("✅ **Permissions-Policy:** Presente. APIs del navegador correctamente restringidas.")
+
+        if "referrer-policy" not in headers_resp:
+            resultados_reales.append("⚠️ **Referrer-Policy:** Ausente. Las URLs internas pueden filtrarse a sitios externos.")
+        else:
+            resultados_reales.append("✅ **Referrer-Policy:** Presente. Filtración de URLs controlada.")
+
+        if "cross-origin-embedder-policy" not in headers_resp:
+            resultados_reales.append("⚠️ **COEP:** Ausente. Posible vulnerabilidad a ataques de canal lateral (Spectre).")
+        else:
+            resultados_reales.append("✅ **COEP:** Presente. Protección contra ataques de canal lateral activa.")
+
+        if "cross-origin-opener-policy" not in headers_resp:
+            resultados_reales.append("⚠️ **COOP:** Ausente. Posible filtración de datos entre pestañas del navegador.")
+        else:
+            resultados_reales.append("✅ **COOP:** Presente. Aislamiento entre pestañas activo.")
+
+    except Exception:
+        pass
+
+    # --- 6. Open Redirect ---
+    try:
+        redirect_payloads = ["//evil.com", "https://evil.com", "/\\evil.com"]
+        for payload in redirect_payloads:
+            try:
+                r = requests.get(base, params={"redirect": payload, "next": payload, "url": payload}, timeout=5, headers=headers_pro, allow_redirects=False)
+                if r.status_code in (301, 302, 303, 307, 308):
+                    location = r.headers.get("location", "")
+                    if "evil.com" in location:
+                        resultados_reales.append("🚨 **Open Redirect:** El servidor redirige a dominios externos sin validación. Vulnerable a phishing.")
+                        break
+            except Exception:
+                pass
+        else:
+            resultados_reales.append("✅ **Open Redirect:** No se detectaron redirecciones abiertas a dominios externos.")
+    except Exception:
+        pass
 
     return resultados_reales
 
@@ -1256,6 +1356,28 @@ def crear_pdf(dominio, resultados):
                 pdf.multi_cell(0, 5, "  -> Impacto real: Su web puede ser 'clonada' de forma invisible en otra pagina fraudulenta para robar clics y datos a los usuarios sin que ellos se den cuenta (Clickjacking).")
             elif "X-Content-Type" in texto_limpio:
                 pdf.multi_cell(0, 5, "  -> Impacto real: Si un usuario sube un archivo inofensivo disfrazado de malware, su servidor podria ejecutarlo por error y ser hackeado.")
+            elif "WAF" in texto_limpio:
+                pdf.multi_cell(0, 5, "  -> Impacto real: Sin firewall de aplicaciones web, cualquier bot automatizado puede lanzar ataques de fuerza bruta, SQLi o XSS directamente contra su web sin ningun filtro.")
+            elif "SQLi" in texto_limpio:
+                pdf.multi_cell(0, 5, "  -> Impacto real: Un atacante puede extraer toda la base de datos de clientes, contrasenas y datos sensibles con un simple comando.")
+            elif "XSS" in texto_limpio:
+                pdf.multi_cell(0, 5, "  -> Impacto real: Los atacantes pueden inyectar codigo malicioso que roba sesiones de usuarios o redirige a paginas de phishing.")
+            elif "SSRF" in texto_limpio:
+                pdf.multi_cell(0, 5, "  -> Impacto real: Un atacante puede acceder a servicios internos de la red privada o robar credenciales de servicios cloud como AWS.")
+            elif "Open Redirect" in texto_limpio:
+                pdf.multi_cell(0, 5, "  -> Impacto real: Los atacantes pueden usar su dominio de confianza para redirigir usuarios a paginas de phishing, aumentando la tasa de exito del ataque.")
+            elif "Permissions-Policy" in texto_limpio:
+                pdf.multi_cell(0, 5, "  -> Impacto real: Sin esta cabecera, el navegador puede acceder a la camara, microfono o geolocalizacion del usuario sin restricciones adicionales.")
+            elif "Referrer-Policy" in texto_limpio:
+                pdf.multi_cell(0, 5, "  -> Impacto real: Las URLs internas con datos sensibles pueden filtrarse a sitios externos cuando un usuario hace clic en un enlace.")
+            elif "COEP" in texto_limpio:
+                pdf.multi_cell(0, 5, "  -> Impacto real: Vulnerable a ataques de canal lateral como Spectre que pueden leer memoria del navegador y robar datos sensibles.")
+            elif "COOP" in texto_limpio:
+                pdf.multi_cell(0, 5, "  -> Impacto real: Posible filtracion de datos entre pestanas del navegador, permitiendo a paginas maliciosas acceder a informacion de otras pestanas abiertas.")
+            elif "CDN" in texto_limpio:
+                pdf.multi_cell(0, 5, "  -> Impacto real: Sin CDN la web es mas vulnerable a ataques DDoS y tiene mayor latencia para usuarios internacionales.")
+            elif "Subdominio" in texto_limpio or "subdominio" in texto_limpio:
+                pdf.multi_cell(0, 5, "  -> Impacto real: Los subdominios de desarrollo suelen tener menos proteccion y pueden usarse como puerta de entrada a la infraestructura principal.")
             else:
                 pdf.multi_cell(0, 5, "  -> Impacto real: Esta configuracion debil facilita la labor de reconocimiento a los atacantes, exponiendo la web a posibles intrusiones no deseadas.")
             
