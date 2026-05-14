@@ -3190,7 +3190,15 @@ curl -X POST https://api.vulnscan.com/v1/scans \\
         # ⚠️ CORRECCIÓN: Ahora bloquea a Basic Y Pro. Solo Enterprise pasa.
         if plan_actual != 'Enterprise':
             st.error(f"🔒 **Función Enterprise.** Tu plan actual ({plan_actual}) no admite notificaciones en tiempo real vía Webhook. Requiere licencia Enterprise.")
-            st.link_button("⬆ Contactar Ventas (Plan Enterprise)", url="https://stripe.com/es", type="primary", width='stretch')
+            email_pago = st.session_state.get("email_usuario", "")
+            if email_pago:
+                try:
+                    url_enterprise = generar_link_pago(
+                        STRIPE_PRICES["enterprise_recurrente"], email_pago, "enterprise_recurrente", "subscription"
+                    )
+                    st.link_button(" Mejorar a Plan Enterprise", url=url_enterprise, type="primary", use_container_width=True)
+                except Exception as e:
+                    st.error(f"No se pudo generar el enlace: {e}")
         else:
             if 'webhook_url' not in st.session_state:
                 st.session_state['webhook_url'] = ""
@@ -3216,7 +3224,65 @@ curl -X POST https://api.vulnscan.com/v1/scans \\
                                     st.warning(f"⚠️ El servidor recibió el aviso, pero devolvió un error: {respuesta.status_code}")
                             except Exception as e:
                                 st.error(f"❌ Fallo de conexión. Revisa la URL o el firewall.")
+                                st.markdown("---")
+            st.markdown("---")
+            st.markdown("""
+                <style>
+                input[type=number]::-webkit-inner-spin-button,
+                input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+                input[type=number] { -moz-appearance: textfield; }
+                div[data-testid="stNumberInput"] { margin-top: -10px; }
+                #btn_guardar_scheduler { background-color: #00FFCC !important; color: black !important; }
+                </style>
+            """, unsafe_allow_html=True)
 
+            with st.container():
+                st.markdown("""
+                    <div style='background:#161b22; border:1px solid #30363d; border-radius:12px; padding:20px; margin-bottom:16px;'>
+                        <h3 style='margin:0; color:#f0f6fc; font-size:1.12rem;'>🤖 Monitoreo Automático (Scheduler)</h3>
+                        <p style='margin:8px 0 0 0; color:#8b949e; font-size:0.94rem;'>El scheduler ejecuta escaneos automáticos de tus dominios verificados sin que tengas que hacer nada. Si tienes un webhook configurado, recibirás una alerta cada vez que se detecte una vulnerabilidad nueva.</p>
+                    </div>
+                """, unsafe_allow_html=True)
+
+                scheduler_activo = st.toggle("Activar monitoreo automático", value=st.session_state.get("scheduler_activo", False))
+
+                if scheduler_activo:
+                    col1, col2, col3 = st.columns(3)
+
+                    with col1:
+                        passive_on = st.toggle("🕵️ Escaneo Pasivo (Basic)", value=st.session_state.get("scheduler_passive_on", True), key="toggle_passive")
+                        freq_passive = st.number_input("Cada X días", min_value=1, max_value=30, value=st.session_state.get("scheduler_freq_passive", 7), key="dias_basic", disabled=not passive_on)
+
+                    with col2:
+                        pro_on = st.toggle("🔍 Escaneo Profundo (Pro)", value=st.session_state.get("scheduler_pro_on", False), key="toggle_pro")
+                        freq_pro = st.number_input("Cada X días", min_value=1, max_value=30, value=st.session_state.get("scheduler_freq_pro", 15), key="dias_pro", disabled=not pro_on)
+
+                    with col3:
+                        enterprise_on = st.toggle("🔬 Auditoría OWASP (Enterprise)", value=st.session_state.get("scheduler_enterprise_on", False), key="toggle_enterprise")
+                        freq_enterprise = st.number_input("Cada X días", min_value=1, max_value=30, value=st.session_state.get("scheduler_freq_enterprise", 7), key="dias_ent", disabled=not enterprise_on)
+
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.button("💾 Guardar configuración de monitoreo", type="primary", use_container_width=True, key="btn_guardar_scheduler"):
+                        actualizar_usuario_supabase(email_usuario, "scheduler_activo", True)
+                        actualizar_usuario_supabase(email_usuario, "scheduler_passive_on", passive_on)
+                        actualizar_usuario_supabase(email_usuario, "scheduler_pro_on", pro_on)
+                        actualizar_usuario_supabase(email_usuario, "scheduler_enterprise_on", enterprise_on)
+                        actualizar_usuario_supabase(email_usuario, "scheduler_freq_passive", freq_passive)
+                        actualizar_usuario_supabase(email_usuario, "scheduler_freq_pro", freq_pro)
+                        actualizar_usuario_supabase(email_usuario, "scheduler_freq_enterprise", freq_enterprise)
+                        st.session_state["scheduler_activo"] = True
+                        st.session_state["scheduler_passive_on"] = passive_on
+                        st.session_state["scheduler_pro_on"] = pro_on
+                        st.session_state["scheduler_enterprise_on"] = enterprise_on
+                        st.session_state["scheduler_freq_passive"] = freq_passive
+                        st.session_state["scheduler_freq_pro"] = freq_pro
+                        st.session_state["scheduler_freq_enterprise"] = freq_enterprise
+                        st.success("✅ Configuración de monitoreo guardada correctamente.")
+                else:
+                    if st.session_state.get("scheduler_activo", False):
+                        actualizar_usuario_supabase(email_usuario, "scheduler_activo", False)
+                        st.session_state["scheduler_activo"] = False
+                    st.info("El monitoreo automático está desactivado. Actívalo para que VulnScan escanee tus dominios automáticamente.")
     # --- 3. GESTIÓN DE FACTURACIÓN ---
     with tab_billing:
         st.markdown("<div class='config-card'><h3 style='margin:0; color:#f0f6fc; font-size:1.12rem;'>Detalles de Suscripción</h3></div>", unsafe_allow_html=True)
