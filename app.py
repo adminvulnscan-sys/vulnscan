@@ -2835,7 +2835,14 @@ with menu_reportes:
 
                         reporte_desbloqueado = st.session_state.get("reporte_pdf_desbloqueado", None)
                         if plan_rep in ['Pro', 'Enterprise'] or reporte_desbloqueado == reporte_id:
+                            import json
                             resultados_rep = rep.get('resultados', [])
+                            if not resultados_rep:
+                                resultados_json = rep.get('resultados_json', '[]')
+                                try:
+                                    resultados_rep = json.loads(resultados_json) if isinstance(resultados_json, str) else resultados_json
+                                except Exception:
+                                    resultados_rep = []
                             if not resultados_rep:
                                 resultados_rep = [f"✅ Dominio analizado: {dominio}", f"📅 Fecha: {fecha}", f"⚠️ Nivel de riesgo: {riesgo}"]
                             pdf_bytes = crear_pdf(dominio, resultados_rep)
