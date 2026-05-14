@@ -1423,22 +1423,71 @@ def crear_pdf(dominio, resultados):
     pdf.cell(0, 15, "3. Plan de Accion y Remediacion", ln=True)
     pdf.line(10, pdf.get_y(), 200, pdf.get_y())
     pdf.ln(5)
-    
+
     pdf.set_font("Helvetica", "", 11)
     pdf.multi_cell(0, 6, "En base a los hallazgos tecnicos documentados en este reporte, se recomienda trasladar las siguientes tareas al equipo de IT o empresa proveedora de servicios tecnologicos:")
     pdf.ln(5)
-    
+
+    # Plan de acción dinámico basado en los resultados reales
+    acciones_alta = []
+    acciones_media = []
+
+    texto_resultados = " ".join(resultados)
+
+    if "SSL" in texto_resultados and ("Caducado" in texto_resultados or "Error" in texto_resultados):
+        acciones_alta.append("Renovar el certificado SSL/TLS de forma urgente. Los navegadores bloquean el acceso a webs con certificados caducados.")
+    if "WAF" in texto_resultados and "Ausente" in texto_resultados:
+        acciones_alta.append("Instalar un Web Application Firewall (WAF). Se recomienda Cloudflare (gratuito) o similar para bloquear ataques automatizados.")
+    if "SQLi" in texto_resultados and "Detectado" in texto_resultados:
+        acciones_alta.append("Corregir urgentemente las vulnerabilidades de inyeccion SQL detectadas. Usar consultas parametrizadas y revisar todo el codigo de acceso a base de datos.")
+    if "XSS" in texto_resultados and "Reflejado" in texto_resultados:
+        acciones_alta.append("Sanitizar todos los inputs del usuario para prevenir ataques XSS. Implementar Content-Security-Policy.")
+    if "SSRF" in texto_resultados and "Detectado" in texto_resultados:
+        acciones_alta.append("Bloquear peticiones del servidor a IPs internas. Implementar lista blanca de URLs permitidas.")
+    if "Lista Negra" in texto_resultados:
+        acciones_alta.append("La IP del servidor esta en listas negras de spam. Contactar con el proveedor de hosting para solicitar la eliminacion de las listas negras.")
+    if "Open Redirect" in texto_resultados:
+        acciones_alta.append("Corregir las redirecciones abiertas. Validar y filtrar todas las URLs de redireccion para que solo apunten a dominios propios.")
+
+    if "HSTS" in texto_resultados:
+        acciones_media.append("Implementar la cabecera Strict-Transport-Security (HSTS) en el servidor web para forzar siempre HTTPS.")
+    if "CSP" in texto_resultados:
+        acciones_media.append("Configurar Content-Security-Policy (CSP) para prevenir inyecciones de codigo malicioso.")
+    if "X-Frame-Options" in texto_resultados:
+        acciones_media.append("Anadir la cabecera X-Frame-Options para proteger contra ataques de Clickjacking.")
+    if "Permissions-Policy" in texto_resultados:
+        acciones_media.append("Configurar Permissions-Policy para restringir el acceso del navegador a APIs sensibles (camara, microfono, geolocalizacion).")
+    if "Referrer-Policy" in texto_resultados:
+        acciones_media.append("Implementar Referrer-Policy para evitar la filtracion de URLs internas a sitios externos.")
+    if "COEP" in texto_resultados:
+        acciones_media.append("Configurar Cross-Origin-Embedder-Policy para proteger contra ataques de canal lateral.")
+    if "COOP" in texto_resultados:
+        acciones_media.append("Configurar Cross-Origin-Opener-Policy para aislar el contexto de navegacion.")
+    if "CDN" in texto_resultados and "No se detected" in texto_resultados:
+        acciones_media.append("Considerar el uso de un CDN como Cloudflare para mejorar la proteccion contra DDoS y reducir la latencia.")
+    if "subdominio" in texto_resultados.lower() or "Subdominio" in texto_resultados:
+        acciones_media.append("Revisar y securizar los subdominios de desarrollo/staging detectados. No exponer entornos de prueba publicamente.")
+
+    if not acciones_alta:
+        acciones_alta.append("No se han detectado vulnerabilidades criticas que requieran accion inmediata.")
+    if not acciones_media:
+        acciones_media.append("No se han detectado vulnerabilidades medias que requieran accion a corto plazo.")
+
     pdf.set_font("Helvetica", "B", 12)
     pdf.cell(0, 8, "Prioridad Alta (1-3 dias):", ln=True)
     pdf.set_font("Helvetica", "", 11)
-    pdf.multi_cell(0, 6, "- Cerrar cualquier puerto de administracion (como SSH o RDP) expuesto publicamente a internet.\n- Validar y renovar los certificados SSL/TLS que presenten anomalias.")
-    pdf.ln(5)
-    
+    for accion in acciones_alta:
+        pdf.multi_cell(0, 6, f"- {accion}")
+        pdf.ln(2)
+
+    pdf.ln(3)
     pdf.set_font("Helvetica", "B", 12)
     pdf.cell(0, 8, "Prioridad Media (1-2 semanas):", ln=True)
     pdf.set_font("Helvetica", "", 11)
-    pdf.multi_cell(0, 6, "- Implementar las cabeceras HTTP de seguridad faltantes (HSTS, X-Frame-Options, CSP) a nivel de servidor web.\n- Configurar un Web Application Firewall (WAF) si no estuviese activo.")
-    
+    for accion in acciones_media:
+        pdf.multi_cell(0, 6, f"- {accion}")
+        pdf.ln(2)
+
     pdf.ln(15)
     pdf.set_font("Helvetica", "B", 20)
     pdf.cell(0, 15, "4. Aviso Legal y Metodologia", ln=True)
@@ -1455,7 +1504,7 @@ def crear_pdf(dominio, resultados):
         "no se hacen responsables de las decisiones tecnicas o de negocio tomadas a partir de este reporte."
     )
     pdf.multi_cell(0, 5, legal_text)
-    
+
     return pdf.output(dest='S').encode('latin-1', errors='replace')
 
 # --- FUNCIONES DE VERIFICACIÓN LEGAL ---
@@ -1981,7 +2030,7 @@ with menu_dashboard:
 
                             msg_status = (
                                 "🌍 Mapeo de puertos y CVE…" if incluir_puertos and not incluir_owasp
-                                else "🔬 Auditoría OWASP (simulación controlada)…" if incluir_owasp
+                                else "🔬 Auditoría OWASP" if incluir_owasp
                                 else "🕵️ OSINT / DNS y huella HTTP…"
                             )
                             with st.status(f"Iniciando análisis real sobre {dom}...") as s:
