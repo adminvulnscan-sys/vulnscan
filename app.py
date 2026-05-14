@@ -92,10 +92,10 @@ def _motor_basic_pasivo(dominio_limpio):
         cabeceras = respuesta.headers
 
         checks = {
-            "X-Frame-Options": "⚠️ Aviso: Falta protección contra clonado (Clickjacking).",
-            "Strict-Transport-Security": "⚠️ Aviso: Falta HSTS (Forzar HTTPS).",
-            "Content-Security-Policy": "⚠️ Aviso: Falta CSP (Prevención de inyecciones de código).",
-            "X-Content-Type-Options": "⚠️ Aviso: Falta X-Content-Type-Options.",
+            "X-Frame-Options": "⚠️  Falta proteccion contra clonado (Clickjacking).",
+            "Strict-Transport-Security": "⚠️  Falta HSTS (Forzar HTTPS).",
+            "Content-Security-Policy": "⚠️  Falta CSP (Prevención de inyecciones de codigo).",
+            "X-Content-Type-Options": "⚠️  Falta X-Content-Type-Options.",
         }
 
         for cap, msg in checks.items():
@@ -1349,7 +1349,7 @@ def crear_pdf(dominio, resultados):
     fallos = [r for r in resultados if "🔴" in r or "🚨" in r or "⚠️" in r or "ℹ️" in r]
     if fallos:
         for malo in fallos:
-            texto_limpio = malo.replace('🔴', '[CRITICO]').replace('🚨', '[ALERTA]').replace('⚠️', '[AVISO]').replace('ℹ️', '[INFO]')
+            texto_limpio = malo.replace('🔴 ', '[CRITICO] ').replace('🚨 ', '[ALERTA] ').replace('⚠️ ', '').replace('ℹ️ ', '').replace('**', '').replace('`', '')
             
             # 1. Imprimimos el fallo técnico en negrita
             pdf.set_font("Helvetica", "B", 11)
