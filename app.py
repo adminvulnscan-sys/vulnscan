@@ -880,10 +880,17 @@ def _aplicar_fila_usuario_a_sesion(datos):
     st.session_state["tokens_ent"] = int(datos.get("tokens_ent") or 0)
     st.session_state["tokens_pdf"] = int(datos.get("tokens_pdf") or 0)
     st.session_state["reporte_pdf_desbloqueado"] = datos.get("reporte_pdf_desbloqueado", None)
+    st.session_state["scheduler_activo"] = bool(datos.get("scheduler_activo", False))
+    st.session_state["scheduler_passive_on"] = bool(datos.get("scheduler_passive_on", True))
+    st.session_state["scheduler_pro_on"] = bool(datos.get("scheduler_pro_on", False))
+    st.session_state["scheduler_enterprise_on"] = bool(datos.get("scheduler_enterprise_on", False))
+    st.session_state["scheduler_freq_passive"] = int(datos.get("scheduler_freq_passive") or 7)
+    st.session_state["scheduler_freq_pro"] = int(datos.get("scheduler_freq_pro") or 15)
+    st.session_state["scheduler_freq_enterprise"] = int(datos.get("scheduler_freq_enterprise") or 7)
     try:
-            verificados = supabase.table("activos_verificados").select("dominio").eq("email_cliente", datos.get("email", "")).execute()
-            st.session_state["dominios_verificados"] = [r["dominio"] for r in verificados.data]
-            print(f"[DEBUG] dominios cargados: {st.session_state['dominios_verificados']}")
+        verificados = supabase.table("activos_verificados").select("dominio").eq("email_cliente", datos.get("email", "")).execute()
+        st.session_state["dominios_verificados"] = [r["dominio"] for r in verificados.data]
+        print(f"[DEBUG] dominios cargados: {st.session_state['dominios_verificados']}")
     except Exception:
         st.session_state["dominios_verificados"] = []
         print(f"[DEBUG dominios_verificados] Error: {Exception}")
