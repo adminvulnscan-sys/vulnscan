@@ -24,7 +24,7 @@ def debe_escanear_hoy(ultimo_escaneo_fecha, frecuencia_dias):
     except Exception:
         return True  # Si no hay fecha, escanear
 
-def ejecutar_motor_basic(dominio):
+from motores import _motor_basic_pasivo, _motor_pro_activo, _motor_enterprise_owasp
     """Motor Basic pasivo — DNS, SSL, cabeceras."""
     resultados = []
     try:
@@ -118,9 +118,90 @@ def main():
             if usuario.get("scheduler_passive_on") and usuario.get("scheduler_freq_passive", 0) > 0:
                 if debe_escanear_hoy(ultima_fecha, usuario.get("scheduler_freq_passive", 7)):
                     print(f"[Scheduler] Ejecutando Basic para {dominio}")
-                    resultados = ejecutar_motor_basic(dominio)
+                    resultados = _motor_basic_pasivo(dominio)
                     guardar_escaneo_supabase(email, dominio, "Rapido (Passive)", resultados)
                     enviar_webhook(webhook_url, dominio, resultados, "Rapido (Passive)")
 
 if __name__ == "__main__":
     main()
+    from motores import _motor_basic_pasivo, _motor_pro_activo, _motor_enterprise_owasp
+    """Motor Pro activo — puertos, fuzzing, tecnologías, CVE."""
+    resultados = _motor_basic_pasivo(dominio)
+    
+    # Mapeo de puertos
+    puertos = {80: "HTTP", 443: "HTTPS", 8080: "HTTP-Alt", 8443: "HTTPS-Alt"}
+    for puerto, desc in puertos.items():
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(1.5)
+            if s.connect_ex((dominio, puerto)) == 0:
+                resultados.append(f"🟢 Puerto {puerto} abierto: {desc}")
+            s.close()
+        except Exception:
+            pass
+
+    # Fuzzing básico
+    rutas = ["/admin", "/login", "/wp-admin", "/.env", "/api", "/backup"]
+    for ruta in rutas:
+        try:
+            r = requests.head(f"https://{dominio}{ruta}", timeout=2, allow_redirects=True)
+            if r.status_code in (200, 301, 302, 401, 403):
+                resultados.append(f"📂 Directorio encontrado ({r.status_code}): {ruta}")
+        except Exception:
+            pass
+
+    # Detección de tecnologías
+    try:
+        r = requests.get(f"https://{dominio}", timeout=5)
+        html = r.text.lower()
+        if "wp-content" in html:
+            resultados.append("🛠️ Tecnología detectada: WordPress")
+        if "nginx" in r.headers.get("server", "").lower():
+            resultados.append("🛠️ Servidor: Nginx")
+        if "apache" in r.headers.get("server", "").lower():
+            resultados.append("🛠️ Servidor: Apache")
+    except Exception:
+        pass
+
+    return resultados
+
+
+from motores import _motor_basic_pasivo, _motor_pro_activo, _motor_enterprise_owasp
+    """Motor Enterprise OWASP — WAF, SQLi, XSS, SSRF."""
+    resultados = ejecutar_motor_pro(dominio)  # Incluye todo el Pro
+
+    headers_pro = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    base = f"https://{dominio}"
+
+    # WAF detection
+    try:
+        r = requests.get(base, params={"id": "1' OR '1'='1"}, timeout=5, headers=headers_pro)
+        if r.status_code in (403, 406, 429):
+            resultados.append("🛡️ WAF detectado y activo.")
+        else:
+            resultados.append("🚨 WAF ausente — vulnerable a ataques automatizados.")
+    except Exception:
+        pass
+
+    # XSS básico
+    try:
+        payload = "<script>alert('xss')</script>"
+        r = requests.get(base, params={"q": payload}, timeout=5, headers=headers_pro)
+        if payload.lower() in r.text.lower():
+            resultados.append("🚨 XSS reflejado detectado.")
+        else:
+            resultados.append("✅ No se detectó XSS reflejado.")
+    except Exception:
+        pass
+
+    # SSRF básico
+    try:
+        r = requests.get(base, params={"url": "http://127.0.0.1"}, timeout=5, headers=headers_pro)
+        if r.status_code == 200 and "localhost" in r.text.lower():
+            resultados.append("🚨 SSRF detectado — el servidor hace peticiones internas.")
+        else:
+            resultados.append("✅ No se detectó SSRF.")
+    except Exception:
+        pass
+
+    return resultados

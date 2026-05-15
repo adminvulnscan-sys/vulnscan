@@ -17,6 +17,7 @@ load_dotenv()
 import stripe
 
 from supabase import create_client, Client
+from motores import _motor_basic_pasivo, _motor_pro_activo, _motor_enterprise_owasp
 
 # --- CONEXIÓN A SUPABASE ---
 @st.cache_resource
