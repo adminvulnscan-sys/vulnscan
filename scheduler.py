@@ -10,7 +10,7 @@ load_dotenv()
 
 # --- Conexión a Supabase ---
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def debe_escanear_hoy(ultimo_escaneo_fecha, frecuencia_dias):
@@ -73,16 +73,29 @@ def main():
     for usuario in usuarios.data:
         email = usuario.get("email")
         webhook_url = usuario.get("webhook_url", "")
-        plan = usuario.get("plan_activo", "Basic")
+        
+        # 1. Blindaje del plan (Forzamos a que empiece en mayúscula y sin espacios)
+        plan_crudo = usuario.get("plan_activo") or "Basic"
+        plan = str(plan_crudo).strip().capitalize()
 
-        print(f"[Scheduler] Procesando usuario: {email} (Plan: {plan})")
+        # 2. Blindaje de las frecuencias (Convertimos NULL a 0 de forma segura)
+        freq_passive = int(usuario.get("scheduler_freq_passive") or 0)
+        freq_pro = int(usuario.get("scheduler_freq_pro") or 0)
+        freq_ent = int(usuario.get("scheduler_freq_enterprise") or 0)
+
+        # 3. Blindaje de los toggles booleanos
+        on_passive = bool(usuario.get("scheduler_passive_on"))
+        on_pro = bool(usuario.get("scheduler_pro_on"))
+        on_ent = bool(usuario.get("scheduler_enterprise_on"))
+
+        print(f"[Scheduler] Procesando usuario: {email} (Plan detectado: {plan})")
 
         dominios = supabase.table("activos_verificados").select("dominio").eq("email_cliente", email).execute()
         if not dominios.data:
             print(f"[Scheduler] {email} no tiene dominios verificados.")
             continue
 
-for activo in dominios.data:
+        for activo in dominios.data:
             dominio = activo["dominio"]
 
             # Obtener última fecha por tipo de escaneo
@@ -93,32 +106,42 @@ for activo in dominios.data:
                 except Exception:
                     return None
 
-            # Escaneo Basic
-            if usuario.get("scheduler_passive_on") and usuario.get("scheduler_freq_passive", 0) > 0:
+            # --- Escaneo Basic ---
+            print(f"  [DEBUG] BASIC -> on_passive={on_passive}, freq_passive={freq_passive}")
+            if on_passive and freq_passive > 0:
                 ultima = get_ultima_fecha("Rapido (Passive)")
-                if debe_escanear_hoy(ultima, usuario.get("scheduler_freq_passive", 7)):
+                if debe_escanear_hoy(ultima, freq_passive):
                     print(f"[Scheduler] Ejecutando Basic para {dominio}")
                     resultados = _motor_basic_pasivo(dominio)
                     guardar_escaneo_supabase(email, dominio, "Rapido (Passive)", resultados)
-                    enviar_webhook(webhook_url, dominio, resultados, "Rapido (Passive)")
+                else:
+                    print(f"    -> Saltando BASIC: No han pasado los dias necesarios desde {ultima}")
 
-            # Escaneo Pro
-            if plan in ["Pro", "Enterprise"] and usuario.get("scheduler_pro_on") and usuario.get("scheduler_freq_pro", 0) > 0:
+            # --- Escaneo Pro ---
+            print(f"  [DEBUG] PRO -> plan={plan}, on_pro={on_pro}, freq_pro={freq_pro}")
+            if plan in ["Pro", "Enterprise"] and on_pro and freq_pro > 0:
                 ultima = get_ultima_fecha("Profundo (Active)")
-                if debe_escanear_hoy(ultima, usuario.get("scheduler_freq_pro", 15)):
+                if debe_escanear_hoy(ultima, freq_pro):
                     print(f"[Scheduler] Ejecutando Pro para {dominio}")
                     resultados = _motor_pro_activo(dominio, True)
                     guardar_escaneo_supabase(email, dominio, "Profundo (Active)", resultados)
-                    enviar_webhook(webhook_url, dominio, resultados, "Profundo (Active)")
+                else:
+                    print(f"    -> Saltando PRO: No han pasado los dias necesarios desde {ultima}")
+            else:
+                print("    -> Saltando PRO por requisitos (Plan bajo, toggle apagado o freq 0)")
 
-            # Escaneo Enterprise
-            if plan == "Enterprise" and usuario.get("scheduler_enterprise_on") and usuario.get("scheduler_freq_enterprise", 0) > 0:
+            # --- Escaneo Enterprise ---
+            print(f"  [DEBUG] ENT -> plan={plan}, on_ent={on_ent}, freq_ent={freq_ent}")
+            if plan == "Enterprise" and on_ent and freq_ent > 0:
                 ultima = get_ultima_fecha("Auditoria Completa (OWASP)")
-                if debe_escanear_hoy(ultima, usuario.get("scheduler_freq_enterprise", 7)):
+                if debe_escanear_hoy(ultima, freq_ent):
                     print(f"[Scheduler] Ejecutando Enterprise para {dominio}")
                     resultados = _motor_enterprise_owasp(dominio)
                     guardar_escaneo_supabase(email, dominio, "Auditoria Completa (OWASP)", resultados)
-                    enviar_webhook(webhook_url, dominio, resultados, "Auditoria Completa (OWASP)")
+                else:
+                    print(f"    -> Saltando ENT: No han pasado los dias necesarios desde {ultima}")
+            else:
+                print("    -> Saltando ENT por requisitos (Plan bajo, toggle apagado o freq 0)")
 
 if __name__ == "__main__":
     main()
