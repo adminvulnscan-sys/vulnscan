@@ -3270,7 +3270,7 @@ curl -X POST https://api.vulnscan.com/v1/scans \\
                         freq_enterprise = st.number_input("Cada X días", min_value=1, max_value=30, value=st.session_state.get("scheduler_freq_enterprise", 7), key="dias_ent", disabled=not enterprise_on)
 
                     st.markdown("<br>", unsafe_allow_html=True)
-                    if st.button("💾 Guardar configuración de monitoreo", type="primary", use_container_width=True, key="btn_guardar_scheduler"):
+                    if st.button(" Guardar configuración de monitoreo", type="primary", use_container_width=True, key="btn_guardar_scheduler"):
                         actualizar_usuario_supabase(email_usuario, "scheduler_activo", True)
                         actualizar_usuario_supabase(email_usuario, "scheduler_passive_on", passive_on)
                         actualizar_usuario_supabase(email_usuario, "scheduler_pro_on", pro_on)
