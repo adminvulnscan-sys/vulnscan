@@ -95,6 +95,11 @@ def main():
                     resultados = _motor_basic_pasivo(dominio)
                     guardar_escaneo_supabase(email, dominio, "Rapido (Passive)", resultados)
                     enviar_webhook(webhook_url, dominio, resultados, "Rapido (Passive)")
+                    print(f"[DEBUG] pro_on: {usuario.get('scheduler_pro_on')} freq: {usuario.get('scheduler_freq_pro')}")
+            print(f"[DEBUG] enterprise_on: {usuario.get('scheduler_enterprise_on')} freq: {usuario.get('scheduler_freq_enterprise')}")
+            print(f"[DEBUG] ultima_fecha: {ultima_fecha}")
+            # Escaneo Pro
+            if plan in ["Pro", "Enterprise"] and ...
 
             # Escaneo Pro
             if plan in ["Pro", "Enterprise"] and usuario.get("scheduler_pro_on") and usuario.get("scheduler_freq_pro", 0) > 0:
