@@ -82,26 +82,30 @@ def main():
             print(f"[Scheduler] {email} no tiene dominios verificados.")
             continue
 
-        for activo in dominios.data:
+for activo in dominios.data:
             dominio = activo["dominio"]
 
-            ultimo = supabase.table("escaneos").select("fecha").eq("email_cliente", email).eq("dominio", dominio).order("id", desc=True).limit(1).execute()
-            ultima_fecha = ultimo.data[0]["fecha"] if ultimo.data else None
+            # Obtener última fecha por tipo de escaneo
+            def get_ultima_fecha(tipo):
+                try:
+                    r = supabase.table("escaneos").select("fecha").eq("email_cliente", email).eq("dominio", dominio).eq("tipo", tipo).order("id", desc=True).limit(1).execute()
+                    return r.data[0]["fecha"] if r.data else None
+                except Exception:
+                    return None
 
             # Escaneo Basic
             if usuario.get("scheduler_passive_on") and usuario.get("scheduler_freq_passive", 0) > 0:
-                if debe_escanear_hoy(ultima_fecha, usuario.get("scheduler_freq_passive", 7)):
+                ultima = get_ultima_fecha("Rapido (Passive)")
+                if debe_escanear_hoy(ultima, usuario.get("scheduler_freq_passive", 7)):
                     print(f"[Scheduler] Ejecutando Basic para {dominio}")
                     resultados = _motor_basic_pasivo(dominio)
                     guardar_escaneo_supabase(email, dominio, "Rapido (Passive)", resultados)
                     enviar_webhook(webhook_url, dominio, resultados, "Rapido (Passive)")
-                    ultima_fecha = datetime.now().strftime("%d/%m/%Y")
-                    
-            print(f"[DEBUG] enterprise_on: {usuario.get('scheduler_enterprise_on')} freq: {usuario.get('scheduler_freq_enterprise')}")
-            print(f"[DEBUG] ultima_fecha: {ultima_fecha}")
+
             # Escaneo Pro
             if plan in ["Pro", "Enterprise"] and usuario.get("scheduler_pro_on") and usuario.get("scheduler_freq_pro", 0) > 0:
-                if debe_escanear_hoy(ultima_fecha, usuario.get("scheduler_freq_pro", 15)):
+                ultima = get_ultima_fecha("Profundo (Active)")
+                if debe_escanear_hoy(ultima, usuario.get("scheduler_freq_pro", 15)):
                     print(f"[Scheduler] Ejecutando Pro para {dominio}")
                     resultados = _motor_pro_activo(dominio, True)
                     guardar_escaneo_supabase(email, dominio, "Profundo (Active)", resultados)
@@ -109,7 +113,8 @@ def main():
 
             # Escaneo Enterprise
             if plan == "Enterprise" and usuario.get("scheduler_enterprise_on") and usuario.get("scheduler_freq_enterprise", 0) > 0:
-                if debe_escanear_hoy(ultima_fecha, usuario.get("scheduler_freq_enterprise", 7)):
+                ultima = get_ultima_fecha("Auditoria Completa (OWASP)")
+                if debe_escanear_hoy(ultima, usuario.get("scheduler_freq_enterprise", 7)):
                     print(f"[Scheduler] Ejecutando Enterprise para {dominio}")
                     resultados = _motor_enterprise_owasp(dominio)
                     guardar_escaneo_supabase(email, dominio, "Auditoria Completa (OWASP)", resultados)
