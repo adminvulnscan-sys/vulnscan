@@ -808,11 +808,11 @@ def crear_pdf(dominio, resultados):
     texto = re.sub(r'[^\x00-\xFF]', '', texto)
     return texto
     resultados = [limpiar(r) for r in resultados]
-        resultados_unicos = []
-        for r in resultados:
-            if r not in resultados_unicos:
-                resultados_unicos.append(r)
-        resultados = resultados_unicos
+    resultados_unicos = []
+    for r in resultados:
+        if r not in resultados_unicos:
+            resultados_unicos.append(r)
+    resultados = resultados_unicos
 
     # 1. Calculamos las métricas para el resumen ejecutivo
     crit_count = sum(1 for r in resultados if "🔴" in r or "🚨" in r)
