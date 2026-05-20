@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 import os
 load_dotenv()
 import stripe
+import re
 
 from supabase import create_client, Client
 from motores import _motor_basic_pasivo, _motor_pro_activo, _motor_enterprise_owasp
@@ -803,12 +804,15 @@ class ReportePDF(FPDF):
             self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
 def crear_pdf(dominio, resultados):
-    resultados = [r.replace('\u2014', '-').replace('\u2013', '-').replace('\u2019', "'").replace('\u201c', '"').replace('\u201d', '"').replace('\u2192', '->') for r in resultados]    # --- FIX DUPLICADOS: Eliminamos cualquier resultado repetido ---
-    resultados_unicos = []
-    for r in resultados:
-        if r not in resultados_unicos:
-            resultados_unicos.append(r)
-    resultados = resultados_unicos
+    texto = texto.replace('\u2014', '-').replace('\u2013', '-').replace('\u2019', "'").replace('\u201c', '"').replace('\u201d', '"').replace('\u2192', '->')
+    texto = re.sub(r'[^\x00-\xFF]', '', texto)
+    return texto
+    resultados = [limpiar(r) for r in resultados]
+        resultados_unicos = []
+        for r in resultados:
+            if r not in resultados_unicos:
+                resultados_unicos.append(r)
+        resultados = resultados_unicos
 
     # 1. Calculamos las métricas para el resumen ejecutivo
     crit_count = sum(1 for r in resultados if "🔴" in r or "🚨" in r)
@@ -922,7 +926,7 @@ def crear_pdf(dominio, resultados):
     if fallos:
         for malo in fallos:
             texto_limpio = malo.replace('🔴 ', '[CRITICO] ').replace('🚨 ', '[ALERTA] ').replace('⚠️ ', '').replace('ℹ️ ', '').replace('**', '').replace('`', '')
-            resultados = [r.encode('latin-1', errors='ignore').decode('latin-1') for r in resultados]
+            
 
             # 1. Imprimimos el fallo técnico en negrita
             pdf.set_font("Helvetica", "B", 11)
@@ -1132,7 +1136,10 @@ def crear_pdf(dominio, resultados):
     )
     pdf.multi_cell(0, 5, legal_text)
 
-    return pdf.output(dest='S').encode('latin-1', errors='replace')
+        output = pdf.output(dest='S')
+    if isinstance(output, str):
+        return output.encode('latin-1', errors='ignore')
+    return bytes(output)
 
 # --- FUNCIONES DE VERIFICACIÓN LEGAL ---
 
