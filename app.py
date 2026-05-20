@@ -1136,10 +1136,10 @@ def crear_pdf(dominio, resultados):
     )
     pdf.multi_cell(0, 5, legal_text)
 
-        output = pdf.output(dest='S')
-    if isinstance(output, str):
-        return output.encode('latin-1', errors='ignore')
-    return bytes(output)
+    output = pdf.output(dest='S')
+if isinstance(output, str):
+    return output.encode('latin-1', errors='ignore')
+return bytes(output)
 
 # --- FUNCIONES DE VERIFICACIÓN LEGAL ---
 
