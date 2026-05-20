@@ -803,8 +803,7 @@ class ReportePDF(FPDF):
             self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
 def crear_pdf(dominio, resultados):
-    resultados = [r.replace('\u2014', '-').replace('\u2013', '-').replace('\u2019', "'").replace('\u201c', '"').replace('\u201d', '"') for r in resultados]
-    # --- FIX DUPLICADOS: Eliminamos cualquier resultado repetido ---
+    resultados = [r.replace('\u2014', '-').replace('\u2013', '-').replace('\u2019', "'").replace('\u201c', '"').replace('\u201d', '"').replace('\u2192', '->') for r in resultados]    # --- FIX DUPLICADOS: Eliminamos cualquier resultado repetido ---
     resultados_unicos = []
     for r in resultados:
         if r not in resultados_unicos:
@@ -923,7 +922,8 @@ def crear_pdf(dominio, resultados):
     if fallos:
         for malo in fallos:
             texto_limpio = malo.replace('🔴 ', '[CRITICO] ').replace('🚨 ', '[ALERTA] ').replace('⚠️ ', '').replace('ℹ️ ', '').replace('**', '').replace('`', '')
-            
+            resultados = [r.encode('latin-1', errors='ignore').decode('latin-1') for r in resultados]
+
             # 1. Imprimimos el fallo técnico en negrita
             pdf.set_font("Helvetica", "B", 11)
             pdf.multi_cell(0, 6, texto_limpio)
@@ -962,6 +962,26 @@ def crear_pdf(dominio, resultados):
                 pdf.multi_cell(0, 5, "  -> Impacto real: Sin CDN la web es mas vulnerable a ataques DDoS y tiene mayor latencia para usuarios internacionales.")
             elif "Subdominio" in texto_limpio or "subdominio" in texto_limpio:
                 pdf.multi_cell(0, 5, "  -> Impacto real: Los subdominios de desarrollo suelen tener menos proteccion y pueden usarse como puerta de entrada a la infraestructura principal.")
+            elif "Clickjacking" in texto_limpio:
+                pdf.multi_cell(0, 5, "  -> Impacto real: Su web puede ser clonada de forma invisible en otra pagina fraudulenta para robar clics y datos a los usuarios sin que ellos se den cuenta.")
+            elif "CVE" in texto_limpio and "[CRITICO]" in texto_limpio:
+                pdf.multi_cell(0, 5, "  -> Impacto real: Vulnerabilidad CRITICA conocida publicamente. Requiere parcheo inmediato. Un atacante puede comprometer completamente el sistema sin autenticacion previa.")
+            elif "CVE" in texto_limpio and "[ALTO]" in texto_limpio:
+                pdf.multi_cell(0, 5, "  -> Impacto real: Vulnerabilidad de severidad ALTA conocida publicamente. Un atacante con conocimientos basicos puede explotar este fallo para comprometer el sistema.")
+            elif "CVE" in texto_limpio and "[MEDIO]" in texto_limpio:
+                pdf.multi_cell(0, 5, "  -> Impacto real: Vulnerabilidad de severidad MEDIA conocida. Puede ser explotada en combinacion con otros fallos para comprometer la seguridad del sistema.")
+            elif "Fuzzing" in texto_limpio and ".env" in texto_limpio:
+                pdf.multi_cell(0, 5, "  -> Impacto real: El archivo .env esta accesible publicamente. Contiene credenciales de base de datos, API keys y secretos de la aplicacion. Riesgo critico de exposicion total.")
+            elif "Fuzzing" in texto_limpio and ".git" in texto_limpio:
+                pdf.multi_cell(0, 5, "  -> Impacto real: El repositorio Git esta expuesto publicamente. Un atacante puede descargar el codigo fuente completo de la aplicacion.")
+            elif "Fuzzing" in texto_limpio and "backup" in texto_limpio:
+                pdf.multi_cell(0, 5, "  -> Impacto real: Archivos de backup accesibles publicamente. Pueden contener datos sensibles de la base de datos o credenciales.")
+            elif "Fuzzing" in texto_limpio and "admin" in texto_limpio:
+                pdf.multi_cell(0, 5, "  -> Impacto real: Panel de administracion accesible publicamente. Expuesto a ataques de fuerza bruta y acceso no autorizado.")
+            elif "Fuzzing" in texto_limpio and "wp-config" in texto_limpio:
+                pdf.multi_cell(0, 5, "  -> Impacto real: Archivo de configuracion de WordPress detectado. Puede contener credenciales de base de datos y claves secretas.")
+            elif "Fuzzing" in texto_limpio:
+                pdf.multi_cell(0, 5, "  -> Impacto real: Ruta sensible accesible publicamente. Puede revelar informacion interna del servidor o facilitar ataques dirigidos.")
             else:
                 pdf.multi_cell(0, 5, "  -> Impacto real: Esta configuracion debil facilita la labor de reconocimiento a los atacantes, exponiendo la web a posibles intrusiones no deseadas.")
             
@@ -979,10 +999,11 @@ def crear_pdf(dominio, resultados):
     pdf.set_text_color(0, 0, 0)
     pdf.set_font("Helvetica", "", 11)
     
-    aciertos = [r for r in resultados if "🟢" in r or "✅" in r]
+    aciertos = [r for r in resultados if "🟢" in r or "✅" in r or "válido" in r or "Abierto" in r or "Deshabilitado" in r or "no aparece" in r or "[OK]" in r]
     if aciertos:
         for bueno in aciertos:
             texto_limpio = bueno.replace('🟢', '[OK]').replace('✅', '[OK]').replace('**', '').replace('`', '')
+            texto_limpio = texto_limpio.encode('latin-1', errors='ignore').decode('latin-1')
             pdf.multi_cell(0, 6, texto_limpio)
             pdf.ln(3)
     else:
@@ -1001,45 +1022,78 @@ def crear_pdf(dominio, resultados):
     pdf.multi_cell(0, 6, "En base a los hallazgos tecnicos documentados en este reporte, se recomienda trasladar las siguientes tareas al equipo de IT o empresa proveedora de servicios tecnologicos:")
     pdf.ln(5)
 
-    # Plan de acción dinámico basado en los resultados reales
     acciones_alta = []
     acciones_media = []
 
     texto_resultados = " ".join(resultados)
 
+    # Alta prioridad
     if "SSL" in texto_resultados and ("Caducado" in texto_resultados or "Error" in texto_resultados):
         acciones_alta.append("Renovar el certificado SSL/TLS de forma urgente. Los navegadores bloquean el acceso a webs con certificados caducados.")
     if "WAF" in texto_resultados and "Ausente" in texto_resultados:
         acciones_alta.append("Instalar un Web Application Firewall (WAF). Se recomienda Cloudflare (gratuito) o similar para bloquear ataques automatizados.")
     if "SQLi" in texto_resultados and "Detectado" in texto_resultados:
-        acciones_alta.append("Corregir urgentemente las vulnerabilidades de inyeccion SQL detectadas. Usar consultas parametrizadas y revisar todo el codigo de acceso a base de datos.")
+        acciones_alta.append("Corregir urgentemente las vulnerabilidades de inyeccion SQL detectadas. Usar consultas parametrizadas.")
     if "XSS" in texto_resultados and "Reflejado" in texto_resultados:
-        acciones_alta.append("Sanitizar todos los inputs del usuario para prevenir ataques XSS. Implementar Content-Security-Policy.")
+        acciones_alta.append("Sanitizar todos los inputs del usuario para prevenir ataques XSS.")
     if "SSRF" in texto_resultados and "Detectado" in texto_resultados:
         acciones_alta.append("Bloquear peticiones del servidor a IPs internas. Implementar lista blanca de URLs permitidas.")
     if "Lista Negra" in texto_resultados:
-        acciones_alta.append("La IP del servidor esta en listas negras de spam. Contactar con el proveedor de hosting para solicitar la eliminacion de las listas negras.")
+        acciones_alta.append("La IP del servidor esta en listas negras de spam. Contactar con el proveedor de hosting.")
     if "Open Redirect" in texto_resultados:
-        acciones_alta.append("Corregir las redirecciones abiertas. Validar y filtrar todas las URLs de redireccion para que solo apunten a dominios propios.")
+        acciones_alta.append("Corregir las redirecciones abiertas. Validar todas las URLs de redireccion.")
+    if "Fuzzing" in texto_resultados and ".env" in texto_resultados:
+        acciones_alta.append("Eliminar o proteger el archivo .env del acceso publico. Contiene credenciales criticas.")
+    if "Fuzzing" in texto_resultados and ".git" in texto_resultados:
+        acciones_alta.append("Bloquear el acceso publico al repositorio .git. Permite descargar el codigo fuente completo.")
+    if "Fuzzing" in texto_resultados and "backup" in texto_resultados:
+        acciones_alta.append("Eliminar los archivos de backup expuestos publicamente.")
+    if "Fuzzing" in texto_resultados and ("backup.sql" in texto_resultados or "db.sql" in texto_resultados):
+        acciones_alta.append("Eliminar dumps de base de datos expuestos publicamente de forma urgente.")
+    if "Version Antigua" in texto_resultados:
+        acciones_alta.append("Actualizar el software del servidor a la version mas reciente para parchear vulnerabilidades conocidas.")
+    if "Base de datos expuesta" in texto_resultados:
+        acciones_alta.append("Cerrar el acceso publico a los puertos de base de datos inmediatamente.")
+    if "SHA-1" in texto_resultados:
+        acciones_alta.append("Migrar el certificado SSL de SHA-1 a SHA-256 o superior. SHA-1 es vulnerable a ataques de colision.")
+    if "Cifrado Debil" in texto_resultados or "RC4" in texto_resultados or "DES" in texto_resultados:
+        acciones_alta.append("Deshabilitar los cipher suites debiles (RC4, DES) y configurar solo cifrados modernos (AES-GCM, ChaCha20).")
+    if "Protocolo Obsoleto" in texto_resultados:
+        acciones_alta.append("Deshabilitar TLS 1.0 y TLS 1.1 en el servidor. Solo permitir TLS 1.2 y TLS 1.3.")
+    if "CVE" in texto_resultados and "[CRITICO]" in texto_resultados:
+        acciones_alta.append("Parchear urgentemente las vulnerabilidades CVE CRITICAS detectadas en el software del servidor. Riesgo de compromiso total del sistema.")
+    if "CVE" in texto_resultados and "[ALTO]" in texto_resultados:
+        acciones_alta.append("Revisar y parchear las vulnerabilidades CVE de severidad ALTA detectadas. Consultar el portal NVD/MITRE para los parches oficiales.")
 
+    # Media prioridad
     if "HSTS" in texto_resultados:
-        acciones_media.append("Implementar la cabecera Strict-Transport-Security (HSTS) en el servidor web para forzar siempre HTTPS.")
+        acciones_media.append("Implementar la cabecera Strict-Transport-Security (HSTS) para forzar siempre HTTPS.")
     if "CSP" in texto_resultados:
         acciones_media.append("Configurar Content-Security-Policy (CSP) para prevenir inyecciones de codigo malicioso.")
-    if "X-Frame-Options" in texto_resultados:
+    if "X-Frame-Options" in texto_resultados or "Clickjacking" in texto_resultados:
         acciones_media.append("Anadir la cabecera X-Frame-Options para proteger contra ataques de Clickjacking.")
     if "Permissions-Policy" in texto_resultados:
-        acciones_media.append("Configurar Permissions-Policy para restringir el acceso del navegador a APIs sensibles (camara, microfono, geolocalizacion).")
+        acciones_media.append("Configurar Permissions-Policy para restringir el acceso del navegador a APIs sensibles.")
     if "Referrer-Policy" in texto_resultados:
-        acciones_media.append("Implementar Referrer-Policy para evitar la filtracion de URLs internas a sitios externos.")
+        acciones_media.append("Implementar Referrer-Policy para evitar la filtracion de URLs internas.")
     if "COEP" in texto_resultados:
         acciones_media.append("Configurar Cross-Origin-Embedder-Policy para proteger contra ataques de canal lateral.")
     if "COOP" in texto_resultados:
         acciones_media.append("Configurar Cross-Origin-Opener-Policy para aislar el contexto de navegacion.")
-    if "CDN" in texto_resultados and "No se detected" in texto_resultados:
-        acciones_media.append("Considerar el uso de un CDN como Cloudflare para mejorar la proteccion contra DDoS y reducir la latencia.")
+    if "CDN" in texto_resultados and "No se detect" in texto_resultados:
+        acciones_media.append("Usar un CDN como Cloudflare para mejorar la proteccion contra DDoS.")
     if "subdominio" in texto_resultados.lower() or "Subdominio" in texto_resultados:
-        acciones_media.append("Revisar y securizar los subdominios de desarrollo/staging detectados. No exponer entornos de prueba publicamente.")
+        acciones_media.append("Revisar y securizar los subdominios de desarrollo/staging detectados.")
+    if "wp-config.php" in texto_resultados and "403" in texto_resultados:
+        acciones_media.append("Se detecto wp-config.php en el servidor. Aunque esta protegido (403), se recomienda moverlo fuera del directorio publico.")
+    if "Email" in texto_resultados and "Expuesto" in texto_resultados:
+        acciones_media.append("Ocultar los emails corporativos expuestos publicamente para reducir el riesgo de phishing dirigido.")
+    if "staging" in texto_resultados.lower() or "desarrollo" in texto_resultados.lower():
+        acciones_media.append("No exponer entornos de desarrollo o staging publicamente. Usar autenticacion o restringir por IP.")
+    if "CVE" in texto_resultados and "[MEDIO]" in texto_resultados:
+        acciones_media.append("Revisar las vulnerabilidades CVE de severidad MEDIA detectadas y aplicar parches cuando sea posible.")
+    if "CVE" in texto_resultados and "[BAJO]" in texto_resultados:
+        Cacciones_media.append("Tener en cuenta las vulnerabilidades CVE de severidad BAJA detectadas en futuras actualizaciones.")
 
     if not acciones_alta:
         acciones_alta.append("No se han detectado vulnerabilidades criticas que requieran accion inmediata.")
@@ -2106,9 +2160,10 @@ with menu_escaneos:
         st.markdown("<h4 style='color: #60b4ff;'>Plan Basic (Gratis)</h4>", unsafe_allow_html=True)
         st.info("""
         **Tecnología Zero-Touch (Sin rastro):**
-        - **OSINT & Fugas:** Búsqueda en fuentes públicas, Shodan y Dark Web.
+        - **Headers de Seguridad: Análisis de 6 cabeceras HTTP críticas (HSTS, CSP, X-Frame-Options y más).
         - **DNS & SSL:** Análisis de registros y caducidad de certificados.
         - **Reputación IP:** Comprobación en listas negras globales.
+        - ** CDN: Detección de protección mediante Cloudflare y otros CDNs.
         
         **Límites de la cuenta Gratis:**
         - 🎯 **Objetivos:** Máximo 3 dominios/mes.
@@ -2136,6 +2191,11 @@ with menu_escaneos:
         - **Port & Banner:** Mapeo de puertos y detección del software exacto.
         - **Fuzzing Web:** Búsqueda por fuerza bruta de directorios ocultos.
         - **CVE Matching:** Cruce automático de hallazgos con bases de datos.
+        - **SSL/TLS Profundo: Análisis de cipher suites, protocolos obsoletos (TLS 1.0/1.1) y firma SHA-1.
+        - **Ficheros Críticos: Detección de archivos sensibles expuestos (.env, .git, backups, configs).
+        - **OSINT Emails: Búsqueda de emails corporativos expuestos públicamente.
+        - **Fingerprinting: Identificación de tecnologías, CMS, frameworks y CDN.
+        - **Subdominios: Enumeración de subdominios expuestos incluyendo entornos dev/staging.
         
         **Ventajas de la cuenta Pro:**
         - 🎯 **Objetivos:** Hasta 25 dominios o IPs al mes.
@@ -2416,9 +2476,11 @@ with menu_reportes:
                                     resultados_rep = json.loads(resultados_json) if isinstance(resultados_json, str) else resultados_json
                                 except Exception:
                                     resultados_rep = []
+                            resultados_rep = [r.replace('\u2192', '->').replace('\u2014', '-').replace('\u2013', '-') for r in resultados_rep]
                             if not resultados_rep:
                                 resultados_rep = [f"✅ Dominio analizado: {dominio}", f"📅 Fecha: {fecha}", f"⚠️ Nivel de riesgo: {riesgo}"]
-                            pdf_bytes = crear_pdf(dominio, resultados_rep)
+                            resultados_rep_limpios = [r.replace('\U0001f7e1', '').replace('\U0001f7e0', '').replace('\U0001f534', '').replace('\U0001f7e2', '').replace('\u26aa', '') if isinstance(r, str) else r for r in resultados_rep]
+                            pdf_bytes = crear_pdf(dominio, resultados_rep_limpios)
                             if st.download_button(
                                 label="📄 Descargar Reporte PDF",
                                 data=pdf_bytes,
@@ -2624,7 +2686,7 @@ with menu_amenazas:
         lista_amenazas = []
         for cve in datos_reales:
             cvss = float(cve.get('cvss', 0)) if cve.get('cvss') else 5.0
-            sev = "🔴 CRÍTICA" if cvss >= 8.0 else ("🟠 ALTA" if cvss >= 5.0 else "🟡 MEDIA")
+            sev = "CRITICA" if cvss >= 8.0 else ("ALTA" if cvss >= 5.0 else "MEDIA")
             desc = cve.get('summary', 'Sin descripción')[:150] + '...' 
             
             lista_amenazas.append({

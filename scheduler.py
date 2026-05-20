@@ -11,8 +11,6 @@ load_dotenv()
 # --- Conexión a Supabase ---
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-print(f"URL: {SUPABASE_URL}")
-print(f"KEY: {SUPABASE_KEY}")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def debe_escanear_hoy(ultimo_escaneo_fecha, frecuencia_dias):
