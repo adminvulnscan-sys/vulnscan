@@ -804,9 +804,10 @@ class ReportePDF(FPDF):
             self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
 def crear_pdf(dominio, resultados):
-    texto = texto.replace('\u2014', '-').replace('\u2013', '-').replace('\u2019', "'").replace('\u201c', '"').replace('\u201d', '"').replace('\u2192', '->')
-    texto = re.sub(r'[^\x00-\xFF]', '', texto)
-    return texto
+    def limpiar(texto):
+        texto = texto.replace('\u2014', '-').replace('\u2013', '-').replace('\u2019', "'").replace('\u201c', '"').replace('\u201d', '"').replace('\u2192', '->')
+        texto = re.sub(r'[^\x00-\xFF]', '', texto)
+        return texto
     resultados = [limpiar(r) for r in resultados]
     resultados_unicos = []
     for r in resultados:
