@@ -1042,7 +1042,7 @@ def crear_pdf(dominio, resultados):
     acciones_alta = []
     acciones_media = []
 
-    texto_resultados = " ".join(resultados)
+    texto_resultados = " ".join(fallos)
 
     # Alta prioridad
     if "SSL" in texto_resultados and ("Caducado" in texto_resultados or "Error" in texto_resultados):
