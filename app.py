@@ -924,7 +924,7 @@ def crear_pdf(dominio, resultados):
     pdf.cell(0, 10, "2.1 Vulnerabilidades y Areas de Riesgo", ln=True)
     pdf.set_text_color(0, 0, 0)
     
-    fallos = [r for r in resultados if "🔴" in r or "🚨" in r or "⚠️" in r or "ℹ️" in r]
+    fallos = [r for r in resultados if "[CRITICO]" in r or "[ALERTA]" in r or "[ALTO]" in r or "[MEDIO]" in r or "Falta" in r or "Fuzzing" in r or "CVE" in r or "Fichero" in r or "Protocolo" in r or "Cifrado" in r or "Version" in r or "expuesta" in r or "expuesto" in r]
     if fallos:
         for malo in fallos:
             texto_limpio = malo.replace('🔴 ', '[CRITICO] ').replace('🚨 ', '[ALERTA] ').replace('⚠️ ', '').replace('ℹ️ ', '').replace('**', '').replace('`', '')
