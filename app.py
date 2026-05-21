@@ -924,7 +924,18 @@ def crear_pdf(dominio, resultados):
     pdf.cell(0, 10, "2.1 Vulnerabilidades y Areas de Riesgo", ln=True)
     pdf.set_text_color(0, 0, 0)
     
-    fallos = [r for r in resultados if "[CRITICO]" in r or "[ALERTA]" in r or "[ALTO]" in r or "[MEDIO]" in r or "Falta" in r or "Fuzzing" in r or "CVE" in r or "Fichero" in r or "Protocolo" in r or "Cifrado" in r or "Version" in r or "expuesta" in r or "expuesto" in r]
+    fallos = [r for r in resultados if 
+    ("[CRITICO]" in r or "[ALERTA]" in r or "[ALTO]" in r or "[MEDIO]" in r or 
+     "Falta" in r or "Protocolo" in r or "Cifrado" in r or "Version Antigua" in r or 
+     "expuesta" in r or
+     ("Fuzzing" in r and ("[CRÍTICO]" in r or "[ALTO]" in r or "[MEDIO]" in r)) or
+     ("CVE" in r and ("[CRITICO]" in r or "[ALTO]" in r or "[MEDIO]" in r)) or
+     ("Fichero" in r and "CRÍTICO" in r and "accesible" in r and "INFO" not in r))
+    and "No se detectaron" not in r
+    and "No se detectó" not in r
+    and "Deshabilitado" not in r
+    and "[INFO]" not in r
+    ]
     if fallos:
         for malo in fallos:
             texto_limpio = malo.replace('🔴 ', '[CRITICO] ').replace('🚨 ', '[ALERTA] ').replace('⚠️ ', '').replace('ℹ️ ', '').replace('**', '').replace('`', '')
@@ -1099,7 +1110,9 @@ def crear_pdf(dominio, resultados):
     if "CVE" in texto_resultados and "[MEDIO]" in texto_resultados:
         acciones_media.append("Revisar las vulnerabilidades CVE de severidad MEDIA detectadas y aplicar parches cuando sea posible.")
     if "CVE" in texto_resultados and "[BAJO]" in texto_resultados:
-        Cacciones_media.append("Tener en cuenta las vulnerabilidades CVE de severidad BAJA detectadas en futuras actualizaciones.")
+        acciones_media.append("Tener en cuenta las vulnerabilidades CVE de severidad BAJA detectadas en futuras actualizaciones.")
+    if "robots.txt" in texto_resultados and "accesible" in texto_resultados:
+        acciones_media.append("Revisar el archivo robots.txt para asegurarse de que no revela rutas privadas sensibles.")    
 
     if not acciones_alta:
         acciones_alta.append("No se han detectado vulnerabilidades criticas que requieran accion inmediata.")
