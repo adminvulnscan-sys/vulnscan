@@ -808,16 +808,17 @@ def crear_pdf(dominio, resultados):
         texto = texto.replace('\u2014', '-').replace('\u2013', '-').replace('\u2019', "'").replace('\u201c', '"').replace('\u201d', '"').replace('\u2192', '->')
         texto = re.sub(r'[^\x00-\xFF]', '', texto)
         return texto
+
+    crit_count = sum(1 for r in resultados if "🔴" in r or "🚨" in r)
+    med_count = sum(1 for r in resultados if "⚠️" in r or "🟡" in r)
+
     resultados = [limpiar(r) for r in resultados]
+
     resultados_unicos = []
     for r in resultados:
         if r not in resultados_unicos:
             resultados_unicos.append(r)
     resultados = resultados_unicos
-
-    # 1. Calculamos las métricas para el resumen ejecutivo
-    crit_count = sum(1 for r in resultados if "🔴" in r or "🚨" in r)
-    med_count = sum(1 for r in resultados if "⚠️" in r or "🟡" in r)
     
     puntos_a_restar = (crit_count * 15) + (med_count * 7)
     nota_final = max(5, min(100, 100 - puntos_a_restar))
