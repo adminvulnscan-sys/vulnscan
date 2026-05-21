@@ -1746,7 +1746,7 @@ with menu_dashboard:
             email_recuperar = st.session_state.get("email_usuario", "")
             print(f"[DEBUG recuperar escaneo] email: {email_recuperar}")
             if email_recuperar:
-                ultimo = supabase.table("escaneos").select("*").eq("email_cliente", email_recuperar).limit(1).execute()               
+                ultimo = supabase.table("escaneos").select("*").eq("email_cliente", email_recuperar).order("created_at", desc=True).limit(1).execute()             
                 if ultimo.data:
                     r = ultimo.data[0]
                     st.session_state['resultados_actuales'] = json.loads(r.get("resultados_json", "[]"))
