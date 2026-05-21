@@ -48,7 +48,7 @@ def generar_link_pago(price_id, email_usuario, tipo_compra, modo):
         mode=modo,
         customer_email=email_usuario,
         metadata={'email': email_usuario, 'tipo': tipo_compra},
-        success_url=os.getenv("APP_URL", "http://localhost:8501") + "/?pago=exitoso",
+        success_url=os.getenv("APP_URL", "http://localhost:8501") + f"/?pago=exitoso&email={email_usuario}",
         cancel_url=os.getenv("APP_URL", "http://localhost:8501") + "/?pago=cancelado",
     )
     return session.url
@@ -607,8 +607,9 @@ if not st.session_state['usuario_autenticado']:
     # Detectar vuelta de Stripe con pago exitoso
     pago_param = st.query_params.get("pago")
     if pago_param == "exitoso":
-       email_recarga = st.session_state.get("email_usuario", "")
+       email_recarga = st.query_params.get("email", "") or st.session_state.get("email_usuario", "")
        if email_recarga:
+           st.session_state["email_usuario"] = email_recarga
            cargar_perfil_usuario(email_recarga)
            try:
               ultimo = supabase.table("escaneos").select("*").eq("email_cliente", email_recarga).order("created_at", desc=True).limit(1).execute()
