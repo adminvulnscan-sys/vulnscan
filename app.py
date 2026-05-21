@@ -607,11 +607,20 @@ if not st.session_state['usuario_autenticado']:
     # Detectar vuelta de Stripe con pago exitoso
     pago_param = st.query_params.get("pago")
     if pago_param == "exitoso":
-        email_recarga = st.session_state.get("email_usuario", "")
-        if email_recarga:
-            cargar_perfil_usuario(email_recarga)
-        st.query_params.clear()
-        st.success("✅ Pago completado. Ya puedes descargar tu reporte.")
+       email_recarga = st.session_state.get("email_usuario", "")
+       if email_recarga:
+           cargar_perfil_usuario(email_recarga)
+           try:
+              ultimo = supabase.table("escaneos").select("*").eq("email_cliente", email_recarga).order("created_at", desc=True).limit(1).execute()
+              if ultimo.data:
+                  r = ultimo.data[0]
+                  st.session_state['resultados_actuales'] = json.loads(r.get("resultados_json", "[]"))
+                  st.session_state['dominio_actual'] = r.get("dominio", "")
+                  st.session_state['nivel_escaneo_guardado'] = r.get("tipo", "Rápido (Passive)")
+           except Exception as e:
+               pass 
+       st.query_params.clear()
+       st.success("✅ Pago completado. Ya puedes descargar tu reporte.")
 
     if st.session_state.get("mostrar_terminos"):
         st.markdown("<br>", unsafe_allow_html=True)
