@@ -1927,8 +1927,8 @@ with menu_dashboard:
             col_g, col_t = st.columns([1, 1], gap="large")
             with col_g:
                 # 1. Conteo preciso basado en tus emojis
-                crit_count = sum(1 for r in resultados if "🔴" in r or "🚨" in r)
-                med_count = sum(1 for r in resultados if "⚠️" in r or "🟡" in r or "Vulnerabilidad Media" in r)
+                crit_count = sum(1 for r in fallos if "🔴" in r or "🚨" in r or "[CRITICO]" in r or "[ALTO]" in r)
+                med_count = sum(1 for r in fallos if "⚠️" in r or "🟡" in r or "[MEDIO]" in r or "Vulnerabilidad Media" in r)
                 
                 # 2. Nueva lógica de puntos: Media solo resta 5
                 puntos_a_restar = (crit_count * 15) + (med_count * 7)
