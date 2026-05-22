@@ -828,8 +828,20 @@ def crear_pdf(dominio, resultados):
         texto = re.sub(r'[^\x00-\xFF]', '', texto)
         return texto
 
-    crit_count = sum(1 for r in resultados if "🔴" in r or "🚨" in r)
-    med_count = sum(1 for r in resultados if "⚠️" in r or "🟡" in r)
+    fallos_temp = [r for r in resultados if 
+        ("[CRITICO]" in r or "[ALERTA]" in r or "[ALTO]" in r or "[MEDIO]" in r or 
+         "Falta" in r or "Protocolo" in r or "Cifrado" in r or "Version Antigua" in r or 
+         "expuesta" in r or
+         ("Fuzzing" in r and ("[CRÍTICO]" in r or "[ALTO]" in r or "[MEDIO]" in r)) or
+         ("CVE" in r and ("[CRITICO]" in r or "[ALTO]" in r or "[MEDIO]" in r)) or
+         ("Fichero" in r and "CRÍTICO" in r and "accesible" in r and "INFO" not in r))
+        and "No se detectaron" not in r
+        and "No se detectó" not in r
+        and "Deshabilitado" not in r
+        and "[INFO]" not in r
+        ]
+    crit_count = sum(1 for r in fallos_temp if "🔴" in r or "🚨" in r or "[CRITICO]" in r or "[ALTO]" in r)
+    med_count = sum(1 for r in fallos_temp if "⚠️" in r or "🟡" in r or "[MEDIO]" in r)
 
     resultados = [limpiar(r) for r in resultados]
 
