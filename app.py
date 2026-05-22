@@ -1926,6 +1926,18 @@ with menu_dashboard:
 
             col_g, col_t = st.columns([1, 1], gap="large")
             with col_g:
+                fallos = [r for r in resultados if 
+                    ("[CRITICO]" in r or "[ALERTA]" in r or "[ALTO]" in r or "[MEDIO]" in r or 
+                     "Falta" in r or "Protocolo" in r or "Cifrado" in r or "Version Antigua" in r or 
+                     "expuesta" in r or
+                     ("Fuzzing" in r and ("[CRÍTICO]" in r or "[ALTO]" in r or "[MEDIO]" in r)) or
+                     ("CVE" in r and ("[CRITICO]" in r or "[ALTO]" in r or "[MEDIO]" in r)) or
+                     ("Fichero" in r and "CRÍTICO" in r and "accesible" in r and "INFO" not in r))
+                    and "No se detectaron" not in r
+                    and "No se detectó" not in r
+                    and "Deshabilitado" not in r
+                    and "[INFO]" not in r
+                    ]
                 # 1. Conteo preciso basado en tus emojis
                 crit_count = sum(1 for r in fallos if "🔴" in r or "🚨" in r or "[CRITICO]" in r or "[ALTO]" in r)
                 med_count = sum(1 for r in fallos if "⚠️" in r or "🟡" in r or "[MEDIO]" in r or "Vulnerabilidad Media" in r)
