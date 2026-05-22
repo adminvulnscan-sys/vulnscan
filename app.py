@@ -710,7 +710,7 @@ Nos reservamos el derecho a **actualizar** estos términos. El uso continuado de
 
         with tab_login:
             with st.form("login_form", clear_on_submit=False):
-                email = st.text_input("Email Corporativo", placeholder="user@gmail.com")
+                email = st.text_input("Email Corporativo", placeholder="example.com")
                 password = st.text_input("Contraseña", type="password", placeholder="********")
                 submit = st.form_submit_button("Iniciar Sesión", use_container_width=True)
 
@@ -725,6 +725,15 @@ Nos reservamos el derecho a **actualizar** estos términos. El uso continuado de
                         st.session_state['datos_cliente_cargados'] = False
                         # AQUÍ ACTIVAMOS LA MAGIA: Cargamos su perfil real de Supabase
                         cargar_perfil_usuario(st.session_state['email_usuario'])
+                        try:
+                            ultimo = supabase.table("escaneos").select("*").eq("email_cliente", respuesta.user.email).order("created_at", desc=True).limit(1).execute()
+                            if ultimo.data:
+                                r = ultimo.data[0]
+                                st.session_state['resultados_actuales'] = json.loads(r.get("resultados_json", "[]"))
+                                st.session_state['dominio_actual'] = r.get("dominio", "")
+                                st.session_state['nivel_escaneo_guardado'] = r.get("tipo", "Rápido (Passive)")
+                        except Exception:
+                            pass
                         st.rerun()
                     except Exception:
                         # Si Supabase rechaza el login, mostramos tu alerta roja original
