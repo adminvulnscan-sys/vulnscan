@@ -734,8 +734,6 @@ Nos reservamos el derecho a **actualizar** estos términos. El uso continuado de
                                 st.session_state['nivel_escaneo_guardado'] = r.get("tipo", "Rápido (Passive)")
                         except Exception:
                             pass
-                        st.write(f"DEBUG email: {respuesta.user.email}")
-                        st.write(f"DEBUG escaneos: {supabase.table('escaneos').select('*').eq('email_cliente', respuesta.user.email).order('created_at', desc=True).limit(1).execute().data}")
                         st.rerun()
                     except Exception:
                         # Si Supabase rechaza el login, mostramos tu alerta roja original
