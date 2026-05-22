@@ -1,7 +1,3 @@
-
-import streamlit as st
-import time
-import pandas as pd
 import os
 import base64
 import json
@@ -16,6 +12,7 @@ import os
 load_dotenv()
 import stripe
 import re
+import streamlit as st
 
 from supabase import create_client, Client
 from motores import _motor_basic_pasivo, _motor_pro_activo, _motor_enterprise_owasp
@@ -324,6 +321,254 @@ if 'mostrar_terminos' not in st.session_state:
     st.session_state['mostrar_terminos'] = False
 
 
+def _parse_resultados_json(raw):
+    """Decodifica resultados_json desde Supabase (str, list, dict o JSON anidado)."""
+    if raw is None:
+        return []
+    parsed = raw
+    if isinstance(raw, str):
+        s = raw.strip()
+        if not s:
+            return []
+        try:
+            parsed = json.loads(s)
+        except json.JSONDecodeError:
+            return [s]
+    if isinstance(parsed, dict):
+        inner = parsed.get("resultados") or parsed.get("items") or parsed.get("data")
+        return inner if isinstance(inner, list) else [parsed]
+    if isinstance(parsed, list):
+        return parsed
+    return [parsed]
+
+
+def _normalizar_lineas_resultado(raw):
+    """Misma forma que tras escanear_objetivo_real: lista de strings para la UI."""
+    items = _parse_resultados_json(raw)
+    lineas = []
+    for item in items:
+        if isinstance(item, str):
+            linea = item.strip()
+            if linea:
+                lineas.append(linea)
+        elif isinstance(item, dict):
+            texto = (
+                item.get("mensaje")
+                or item.get("texto")
+                or item.get("detalle")
+                or item.get("descripcion")
+                or item.get("hallazgo")
+            )
+            if texto:
+                lineas.append(str(texto).strip())
+            else:
+                lineas.append(json.dumps(item, ensure_ascii=False))
+        elif item is not None:
+            lineas.append(str(item).strip())
+    visto = []
+    for linea in lineas:
+        if linea not in visto:
+            visto.append(linea)
+    return visto
+
+
+def _id_reporte_desde_fila(fila, index=0):
+    if not fila:
+        return ""
+    if fila.get("id") is not None:
+        return str(fila.get("id"))
+    dominio = fila.get("dominio", "Desconocido")
+    fecha = fila.get("fecha") or fila.get("created_at") or "Hoy"
+    return f"{dominio}_{fecha}_{index}"
+
+
+def _tiene_escaneo_visible_en_sesion():
+    if "resultados_actuales" not in st.session_state:
+        return False
+    res = st.session_state.get("resultados_actuales")
+    return isinstance(res, list) and len(res) > 0
+
+
+def _calcular_derecho_pdf(nivel_usado, fila_escaneo=None):
+    """Réplica de la lógica del Dashboard para habilitar descarga PDF."""
+    plan_actual = st.session_state.get("plan_activo", "Basic")
+    tokens_pdf = int(st.session_state.get("tokens_pdf") or 0)
+    escaneo_id = st.session_state.get("escaneo_actual_id")
+    if not escaneo_id and fila_escaneo:
+        escaneo_id = _id_reporte_desde_fila(fila_escaneo)
+    reporte_desbloqueado = st.session_state.get("reporte_pdf_desbloqueado")
+    desbloqueado_este = (
+        reporte_desbloqueado is not None
+        and escaneo_id
+        and str(reporte_desbloqueado) == str(escaneo_id)
+    )
+    return (
+        plan_actual in ("Pro", "Enterprise")
+        or nivel_usado in ("Profundo (Active)", "Auditoría Completa (OWASP)")
+        or tokens_pdf > 0
+        or desbloqueado_este
+    )
+
+
+def _sincronizar_derecho_pdf_en_sesion(fila_escaneo=None):
+    nivel = st.session_state.get("nivel_escaneo_guardado", "Rápido (Passive)")
+    habilitado = _calcular_derecho_pdf(nivel, fila_escaneo)
+    st.session_state["pdf_descarga_habilitada"] = habilitado
+    if habilitado:
+        st.session_state.pop("token_pdf_descontado", None)
+    return habilitado
+
+
+def _aplicar_escaneo_reciente_a_sesion(fila, email):
+    """Copia en session_state las mismas claves que usa el Dashboard tras un escaneo nuevo."""
+    email_clean = (email or "").strip()
+    dominio = (fila.get("dominio") or "").strip()
+    nivel = fila.get("tipo") or "Rápido (Passive)"
+    fecha = fila.get("fecha") or datetime.now().strftime("%d/%m/%Y")
+    riesgo = fila.get("riesgo") or "Medio"
+
+    resultados = _normalizar_lineas_resultado(fila.get("resultados_json"))
+    if not resultados:
+        resultados = ["No se encontraron vulnerabilidades aparentes."]
+
+    st.session_state["resultados_actuales"] = resultados
+    st.session_state["dominio_actual"] = dominio
+    st.session_state["nivel_escaneo_guardado"] = nivel
+    st.session_state["dominio_rapido"] = dominio
+    st.session_state["escaneo_actual_id"] = _id_reporte_desde_fila(fila)
+    st.session_state["escaneo_actual_fecha"] = fecha
+    st.session_state["escaneo_actual_riesgo"] = riesgo
+
+    entrada_historial = {
+        "id": fila.get("id"),
+        "email_cliente": email_clean,
+        "dominio": dominio,
+        "tipo": nivel,
+        "fecha": fecha,
+        "riesgo": riesgo,
+        "resultados_json": json.dumps(resultados, ensure_ascii=False),
+        "resultados": resultados,
+        "created_at": fila.get("created_at"),
+    }
+    if "historial_escaneos" not in st.session_state:
+        st.session_state["historial_escaneos"] = []
+    historial = st.session_state["historial_escaneos"]
+    clave = (email_clean, dominio, nivel, fecha)
+    ya = any(
+        (h.get("email_cliente"), h.get("dominio"), h.get("tipo"), h.get("fecha")) == clave
+        for h in historial
+    )
+    if not ya:
+        historial.append(entrada_historial)
+
+    _sincronizar_derecho_pdf_en_sesion(fila)
+    return True
+
+
+def _confirmar_compra_pdf_tras_stripe(email):
+    """Tras ?pago=exitoso: recarga perfil y desbloquea PDF del último escaneo si aplica."""
+    email_clean = (email or "").strip()
+    if not email_clean:
+        return
+    cargar_perfil_usuario(email_clean)
+    if not restaurar_ultimo_escaneo_supabase(email_clean):
+        return
+    escaneo_id = st.session_state.get("escaneo_actual_id")
+    if not escaneo_id:
+        return
+    tokens_pdf = int(st.session_state.get("tokens_pdf") or 0)
+    plan = st.session_state.get("plan_activo", "Basic")
+    if plan in ("Pro", "Enterprise") or tokens_pdf > 0:
+        _sincronizar_derecho_pdf_en_sesion()
+        return
+    actualizar_usuario_supabase(email_clean, "reporte_pdf_desbloqueado", escaneo_id)
+    st.session_state["reporte_pdf_desbloqueado"] = escaneo_id
+    tokens_actuales = int(st.session_state.get("tokens_pdf") or 0)
+    if tokens_actuales == 0:
+        actualizar_usuario_supabase(email_clean, "tokens_pdf", 1)
+        st.session_state["tokens_pdf"] = 1
+    _sincronizar_derecho_pdf_en_sesion()
+
+
+def restaurar_ultimo_escaneo_supabase(email):
+    """Recupera el último escaneo y lo deja listo para pintar el Dashboard igual que un escaneo nuevo."""
+    email_clean = (email or "").strip()
+    if not email_clean:
+        return False
+    try:
+        ultimo = (
+            supabase.table("escaneos")
+            .select("*")
+            .eq("email_cliente", email_clean)
+            .order("id", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if not ultimo.data:
+            print(f"[restaurar escaneo] Sin filas para {email_clean!r}")
+            return False
+        fila = ultimo.data[0]
+        _aplicar_escaneo_reciente_a_sesion(fila, email_clean)
+        print(
+            f"[restaurar escaneo] OK dominio={st.session_state.get('dominio_actual')!r} "
+            f"lineas={len(st.session_state.get('resultados_actuales') or [])} "
+            f"pdf={st.session_state.get('pdf_descarga_habilitada')}"
+        )
+        return True
+    except Exception as e:
+        print(f"[restaurar escaneo] Error para {email_clean!r}: {e!r}")
+        return False
+
+
+def _guardar_tokens_auth_en_sesion(auth_response):
+    session = getattr(auth_response, "session", None)
+    if not session:
+        return
+    access = getattr(session, "access_token", None)
+    refresh = getattr(session, "refresh_token", None)
+    if access:
+        st.session_state["sb_access_token"] = access
+    if refresh:
+        st.session_state["sb_refresh_token"] = refresh
+
+
+def _limpiar_tokens_auth_sesion():
+    for key in ("sb_access_token", "sb_refresh_token"):
+        st.session_state.pop(key, None)
+
+
+def _restaurar_sesion_auth_supabase():
+    """Tras refresh o vuelta externa (Stripe), rehidrata login si los tokens siguen en memoria."""
+    if st.session_state.get("usuario_autenticado"):
+        return True
+    access = st.session_state.get("sb_access_token")
+    refresh = st.session_state.get("sb_refresh_token")
+    if not access or not refresh:
+        return False
+    try:
+        try:
+            supabase.auth.set_session(access, refresh)
+        except TypeError:
+            supabase.auth.set_session(
+                {"access_token": access, "refresh_token": refresh}
+            )
+        user_resp = supabase.auth.get_user()
+        user = getattr(user_resp, "user", None)
+        if not user or not getattr(user, "email", None):
+            _limpiar_tokens_auth_sesion()
+            return False
+        st.session_state["usuario_autenticado"] = True
+        st.session_state["email_usuario"] = user.email
+        st.session_state["datos_cliente_cargados"] = False
+        cargar_perfil_usuario(user.email)
+        restaurar_ultimo_escaneo_supabase(user.email)
+        return True
+    except Exception as e:
+        print(f"[restaurar auth] {e!r}")
+        _limpiar_tokens_auth_sesion()
+        return False
+
+
 def _query_param_terms_activo():
     try:
         qp = st.query_params
@@ -514,6 +759,10 @@ if st.session_state.get("usuario_autenticado") and st.session_state.get("email_u
     _pa = st.session_state.get("plan_activo", "Basic")
     if _pa in (None, "", "Basic"):
         cargar_perfil_usuario(st.session_state["email_usuario"])
+
+_rehidratado = _restaurar_sesion_auth_supabase()
+if _rehidratado:
+    st.session_state["datos_cliente_cargados"] = False
 # -----------------------------------------------------
 
 if not st.session_state['usuario_autenticado']:
@@ -607,21 +856,12 @@ if not st.session_state['usuario_autenticado']:
     # Detectar vuelta de Stripe con pago exitoso
     pago_param = st.query_params.get("pago")
     if pago_param == "exitoso":
-       email_recarga = st.query_params.get("email", "") or st.session_state.get("email_usuario", "")
-       if email_recarga:
-           st.session_state["email_usuario"] = email_recarga
-           cargar_perfil_usuario(email_recarga)
-           try:
-              ultimo = supabase.table("escaneos").select("*").eq("email_cliente", email_recarga).order("created_at", desc=True).limit(1).execute()
-              if ultimo.data:
-                  r = ultimo.data[0]
-                  st.session_state['resultados_actuales'] = json.loads(r.get("resultados_json", "[]"))
-                  st.session_state['dominio_actual'] = r.get("dominio", "")
-                  st.session_state['nivel_escaneo_guardado'] = r.get("tipo", "Rápido (Passive)")
-           except Exception as e:
-               pass 
-       st.query_params.clear()
-       st.success("✅ Pago completado. Ya puedes descargar tu reporte.")
+        email_recarga = st.query_params.get("email", "") or st.session_state.get("email_usuario", "")
+        if email_recarga:
+            st.session_state["email_usuario"] = email_recarga
+            _confirmar_compra_pdf_tras_stripe(email_recarga)
+        st.query_params.clear()
+        st.success("✅ Pago completado. Ya puedes descargar tu reporte.")
 
     if st.session_state.get("mostrar_terminos"):
         st.markdown("<br>", unsafe_allow_html=True)
@@ -723,17 +963,9 @@ Nos reservamos el derecho a **actualizar** estos términos. El uso continuado de
                         st.session_state['usuario_autenticado'] = True
                         st.session_state['email_usuario'] = respuesta.user.email
                         st.session_state['datos_cliente_cargados'] = False
-                        # AQUÍ ACTIVAMOS LA MAGIA: Cargamos su perfil real de Supabase
+                        _guardar_tokens_auth_en_sesion(respuesta)
                         cargar_perfil_usuario(st.session_state['email_usuario'])
-                        try:
-                            ultimo = supabase.table("escaneos").select("*").eq("email_cliente", respuesta.user.email).order("created_at", desc=True).limit(1).execute()
-                            if ultimo.data:
-                                r = ultimo.data[0]
-                                st.session_state['resultados_actuales'] = json.loads(r.get("resultados_json", "[]"))
-                                st.session_state['dominio_actual'] = r.get("dominio", "")
-                                st.session_state['nivel_escaneo_guardado'] = r.get("tipo", "Rápido (Passive)")
-                        except Exception:
-                            pass
+                        restaurar_ultimo_escaneo_supabase(respuesta.user.email)
                         st.rerun()
                     except Exception:
                         # Si Supabase rechaza el login, mostramos tu alerta roja original
@@ -1295,6 +1527,8 @@ if st.session_state.get('usuario_autenticado'):
     email_actual = st.session_state.get('email_usuario', '')
     if email_actual and not st.session_state['datos_cliente_cargados']:
         cargar_perfil_usuario(email_actual)
+        if not _tiene_escaneo_visible_en_sesion():
+            restaurar_ultimo_escaneo_supabase(email_actual)
         fecha_trial_str = st.session_state.get('fecha_inicio_trial')
         plan_memoria = st.session_state.get('plan_activo', 'Basic')
         if plan_memoria == 'Pro' and fecha_trial_str:
@@ -1315,10 +1549,17 @@ with st.sidebar:
             supabase.auth.sign_out()
         except:
             pass # Si falla por red, que siga cerrando la app visualmente
-            
+
+        _limpiar_tokens_auth_sesion()
         st.session_state['usuario_autenticado'] = False
         st.session_state['datos_cliente_cargados'] = False
         st.session_state['plan_activo'] = 'Basic'
+        for _k in (
+            'resultados_actuales', 'dominio_actual', 'nivel_escaneo_guardado',
+            'dominio_rapido', 'escaneo_actual_id', 'escaneo_actual_fecha',
+            'escaneo_actual_riesgo', 'pdf_descarga_habilitada',
+        ):
+            st.session_state.pop(_k, None)
         st.rerun()
 
     # --- 1. PERFIL DINÁMICO MULTI-USUARIO ---
@@ -1735,6 +1976,9 @@ with menu_dashboard:
 
                                 st.session_state['dominio_actual'] = dom
                                 st.session_state['nivel_escaneo_guardado'] = nivel
+                                st.session_state['dominio_rapido'] = dom
+                                st.session_state['escaneo_actual_fecha'] = datetime.now().strftime("%d/%m/%Y")
+                                st.session_state['escaneo_actual_riesgo'] = "Medio"
 
                                 registrar_dominio_cliente(email_u, dom)
                                 registrar_objetivo_mes_si_nuevo(email_u, dom)
@@ -1761,10 +2005,16 @@ with menu_dashboard:
                                 )
 
                                 try:
-                                    supabase.table("escaneos").insert(nuevo_escaneo).execute()
+                                    ins = supabase.table("escaneos").insert(nuevo_escaneo).execute()
+                                    if getattr(ins, "data", None):
+                                        nuevo_escaneo["id"] = ins.data[0].get("id")
                                     print("¡Datos enviados a Supabase correctamente!")
                                 except Exception as e:
                                     print(f"Error al guardar en Supabase: {e}")
+
+                                nuevo_escaneo["resultados"] = resultados_auditoria
+                                st.session_state["escaneo_actual_id"] = _id_reporte_desde_fila(nuevo_escaneo)
+                                _sincronizar_derecho_pdf_en_sesion(nuevo_escaneo)
 
                                 st.rerun()
         else:
@@ -1772,22 +2022,12 @@ with menu_dashboard:
 
     # --- RESULTADOS Y DESCARGA DE PDF ---
     # --- Recuperar último escaneo desde Supabase si se perdió por redirección de Stripe ---
-    if 'resultados_actuales' not in st.session_state:
-        try:
-            email_recuperar = st.session_state.get("email_usuario", "")
-            print(f"[DEBUG recuperar escaneo] email: {email_recuperar}")
-            if email_recuperar:
-                ultimo = supabase.table("escaneos").select("*").eq("email_cliente", email_recuperar).order("created_at", desc=True).limit(1).execute()             
-                if ultimo.data:
-                    r = ultimo.data[0]
-                    st.session_state['resultados_actuales'] = json.loads(r.get("resultados_json", "[]"))
-                    st.session_state['dominio_actual'] = r.get("dominio", "")
-                    st.session_state['nivel_escaneo_guardado'] = r.get("tipo", "Rápido (Passive)")
-        except Exception as e:
-            print(f"[DEBUG recuperar escaneo] Error: {e}")
-            pass
+    if not _tiene_escaneo_visible_en_sesion():
+        email_recuperar = st.session_state.get("email_usuario", "")
+        if email_recuperar:
+            restaurar_ultimo_escaneo_supabase(email_recuperar)
 
-    if 'resultados_actuales' not in st.session_state:
+    if not _tiene_escaneo_visible_en_sesion():
         icono_estado = (
             f'<img src="data:image/png;base64,{logo_b64}" style="width:72px; height:auto; margin-bottom:10px;">'
             if logo_b64 else "🛡️"
@@ -1800,20 +2040,18 @@ with menu_dashboard:
                 </p>
             </div>
         """, unsafe_allow_html=True)
-    if 'resultados_actuales' in st.session_state:
+    if _tiene_escaneo_visible_en_sesion():
         resultados = st.session_state['resultados_actuales']
-        dominio_escaneado = st.session_state['dominio_actual']
+        dominio_escaneado = st.session_state.get('dominio_actual', '')
         nivel_usado = st.session_state.get('nivel_escaneo_guardado', 'Rápido (Passive)')
+        _sincronizar_derecho_pdf_en_sesion()
 
         st.markdown("---")
         st.subheader(" Exportar Resultados")
         
         plan_actual = st.session_state.get('plan_activo', 'Basic')
-
-        # LÓGICA MAESTRA: ¿Le damos el PDF?
-        # SÍ, si su plan es Pro/Enterprise. O SÍ, si el escaneo que acaba de hacer era un escaneo de pago (usó un token).
-        tokens_pdf = st.session_state.get("tokens_pdf", 0)
-        tiene_derecho_pdf = plan_actual in ['Pro', 'Enterprise'] or nivel_usado in ["Profundo (Active)", "Auditoría Completa (OWASP)"] or tokens_pdf > 0
+        tokens_pdf = int(st.session_state.get("tokens_pdf") or 0)
+        tiene_derecho_pdf = bool(st.session_state.get("pdf_descarga_habilitada"))
         if not tiene_derecho_pdf:
             st.button("🔒 Descargar Reporte en PDF (Pro)", use_container_width=True, disabled=True)
             st.error("🔒 **Función Premium.** Necesitas el Plan Pro para exportar un escaneo Pasivo en formato ejecutivo.")
