@@ -12,6 +12,10 @@ import os
 load_dotenv()
 import stripe
 import re
+import ssl
+import dns.resolver
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import time 
 import streamlit as st
 
 from supabase import create_client, Client
@@ -1054,34 +1058,117 @@ class ReportePDF(FPDF):
             self.set_text_color(150, 150, 150)
             self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
+
+def _limpiar_texto_pdf(texto):
+    texto = texto.replace('\u2014', '-').replace('\u2013', '-').replace('\u2019', "'").replace('\u201c', '"').replace('\u201d', '"').replace('\u2192', '->')
+    texto = re.sub(r'[^\x00-\xFF]', '', texto)
+    return texto
+
+
+def _marcar_emojis_pdf(texto):
+    """Convierte emojis a etiquetas ASCII antes de limpiar latin-1."""
+    if not isinstance(texto, str):
+        texto = str(texto)
+    for emoji, etiqueta in (
+        ('\U0001f534', '[CRITICO] '),
+        ('\U0001f7e0', '[ALTO] '),
+        ('\U0001f7e1', '[MEDIO] '),
+        ('\U0001f7e2', '[OK] '),
+        ('\U0001f6a8', '[ALERTA] '),
+        ('\u26a0\ufe0f', '[MEDIO] '),
+        ('\u26a0', '[MEDIO] '),
+        ('\u2705', '[OK] '),
+        ('\U0001f7e2', '[OK] '),
+    ):
+        texto = texto.replace(emoji, etiqueta)
+    return texto
+
+
+def _es_hallazgo_ok(linea):
+    rl = linea.lower()
+    if '[ok]' in rl or ' valido' in rl or ' válido' in rl:
+        return True
+    if any(x in rl for x in (
+    'no se detectaron', 'no se detectó', 'no se detecto',
+    'correctamente configurad', 'correctamente deshabilitad',
+    'deshabilitados', 'no aparece',
+    )) and 'cdn' not in rl and 'waf' not in rl and 'rate limiting' not in rl:
+        return True
+    if 'waf detectado' in rl or 'firewall activo' in rl:
+        return True
+    if 'rate limiting' in rl and any(x in rl for x in ('bloquea peticiones', 'protegido contra', 'detecta y bloquea')):
+        return True
+    if 'abierto' in rl and '[critico]' not in rl and '[alerta]' not in rl and 'ftp' not in rl:
+        return True
+    return False
+
+
+def _es_hallazgo_riesgo(linea):
+    if _es_hallazgo_ok(linea):
+        return False
+    rl = linea.lower()
+    if '[info]' in rl:
+        return False
+    if any(x in rl for x in ('no se detectaron', 'no se detectó', 'no se detecto')) and 'rate limiting' not in rl:
+        return False
+    marcadores = (
+        '[critico]', '[alerta]', '[alto]', '[medio]',
+        'falta ', 'protocolo obsoleto', 'cifrado debil', 'version antigua',
+        'expuesta', 'expuesto', 'ausente', 'insegura', 'peligrosos',
+        'takeover', 'fuga', 'cors mal', 'confirmado', 'detectado',
+        'cookie insegura', 'api expuesta', 'apis expuestas', 'endpoint expuesto',
+        'sqli', 'xss', 'rate limiting ausente', 'sin proteccion activa',
+        'debil', 'vulnerable', 'accesible publicamente', 'puerto 21', 'ftp abierto',
+    )
+    if any(m in rl for m in marcadores):
+        return True
+    if 'fuzzing' in rl and any(t in linea for t in ('[CRÍTICO]', '[CRITICO]', '[ALTO]', '[MEDIO]')):
+        return True
+    if 'cve' in rl and any(t in linea for t in ('[CRITICO]', '[ALTO]', '[MEDIO]')):
+        return True
+    if 'fichero' in rl and 'critico' in rl and 'accesible' in rl and '[info]' not in rl:
+        return True
+    return False
+
+
+def _preparar_resultados_pdf(resultados):
+    lineas = []
+    visto = set()
+    for raw in resultados or []:
+        if raw is None:
+            continue
+        linea = _limpiar_texto_pdf(_marcar_emojis_pdf(str(raw).strip()))
+        if not linea or linea in visto:
+            continue
+        visto.add(linea)
+        lineas.append(linea)
+    return lineas
+
+
+def _clasificar_hallazgos_pdf(lineas):
+    fallos, aciertos, resto = [], [], []
+    for linea in lineas:
+        if _es_hallazgo_riesgo(linea):
+            fallos.append(linea)
+        elif _es_hallazgo_ok(linea):
+            aciertos.append(linea)
+        else:
+            resto.append(linea)
+    return fallos, aciertos, resto
+
+
 def crear_pdf(dominio, resultados):
-    def limpiar(texto):
-        texto = texto.replace('\u2014', '-').replace('\u2013', '-').replace('\u2019', "'").replace('\u201c', '"').replace('\u201d', '"').replace('\u2192', '->')
-        texto = re.sub(r'[^\x00-\xFF]', '', texto)
-        return texto
+    resultados = _preparar_resultados_pdf(resultados)
+    fallos, aciertos, resto = _clasificar_hallazgos_pdf(resultados)
 
-    fallos_temp = [r for r in resultados if 
-        ("[CRITICO]" in r or "[ALERTA]" in r or "[ALTO]" in r or "[MEDIO]" in r or 
-         "Falta" in r or "Protocolo" in r or "Cifrado" in r or "Version Antigua" in r or 
-         "expuesta" in r or
-         ("Fuzzing" in r and ("[CRÍTICO]" in r or "[ALTO]" in r or "[MEDIO]" in r)) or
-         ("CVE" in r and ("[CRITICO]" in r or "[ALTO]" in r or "[MEDIO]" in r)) or
-         ("Fichero" in r and "CRÍTICO" in r and "accesible" in r and "INFO" not in r))
-        and "No se detectaron" not in r
-        and "No se detectó" not in r
-        and "Deshabilitado" not in r
-        and "[INFO]" not in r
-        ]
-    crit_count = sum(1 for r in fallos_temp if "🔴" in r or "🚨" in r or "[CRITICO]" in r or "[ALTO]" in r)
-    med_count = sum(1 for r in fallos_temp if "⚠️" in r or "🟡" in r or "[MEDIO]" in r)
-
-    resultados = [limpiar(r) for r in resultados]
-
-    resultados_unicos = []
-    for r in resultados:
-        if r not in resultados_unicos:
-            resultados_unicos.append(r)
-    resultados = resultados_unicos
+    crit_count = sum(
+        1 for r in fallos
+        if any(t in r for t in ('[CRITICO]', '[ALERTA]', '[ALTO]'))
+    )
+    med_count = sum(
+        1 for r in fallos
+        if '[MEDIO]' in r or 'Vulnerabilidad Media' in r
+    )
     
     puntos_a_restar = (crit_count * 15) + (med_count * 7)
     nota_final = max(5, min(100, 100 - puntos_a_restar))
@@ -1186,22 +1273,10 @@ def crear_pdf(dominio, resultados):
     pdf.set_text_color(220, 53, 69)
     pdf.cell(0, 10, "2.1 Vulnerabilidades y Areas de Riesgo", ln=True)
     pdf.set_text_color(0, 0, 0)
-    
-    fallos = [r for r in resultados if 
-    ("[CRITICO]" in r or "[ALERTA]" in r or "[ALTO]" in r or "[MEDIO]" in r or 
-     "Falta" in r or "Protocolo" in r or "Cifrado" in r or "Version Antigua" in r or 
-     "expuesta" in r or
-     ("Fuzzing" in r and ("[CRÍTICO]" in r or "[ALTO]" in r or "[MEDIO]" in r)) or
-     ("CVE" in r and ("[CRITICO]" in r or "[ALTO]" in r or "[MEDIO]" in r)) or
-     ("Fichero" in r and "CRÍTICO" in r and "accesible" in r and "INFO" not in r))
-    and "No se detectaron" not in r
-    and "No se detectó" not in r
-    and "Deshabilitado" not in r
-    and "[INFO]" not in r
-    ]
+
     if fallos:
         for malo in fallos:
-            texto_limpio = malo.replace('🔴 ', '[CRITICO] ').replace('🚨 ', '[ALERTA] ').replace('⚠️ ', '').replace('ℹ️ ', '').replace('**', '').replace('`', '')
+            texto_limpio = malo.replace('**', '').replace('`', '')
             
 
             # 1. Imprimimos el fallo técnico en negrita
@@ -1278,17 +1353,17 @@ def crear_pdf(dominio, resultados):
     pdf.cell(0, 10, "2.2 Controles de Seguridad Activos", ln=True)
     pdf.set_text_color(0, 0, 0)
     pdf.set_font("Helvetica", "", 11)
-    
-    aciertos = [r for r in resultados if "🟢" in r or "✅" in r or "válido" in r or "Abierto" in r or "Deshabilitado" in r or "no aparece" in r or "[OK]" in r]
+
     if aciertos:
         for bueno in aciertos:
-            texto_limpio = bueno.replace('🟢', '[OK]').replace('✅', '[OK]').replace('**', '').replace('`', '')
+            texto_limpio = bueno.replace('**', '').replace('`', '')
             texto_limpio = texto_limpio.encode('latin-1', errors='ignore').decode('latin-1')
             pdf.multi_cell(0, 6, texto_limpio)
             pdf.ln(3)
     else:
         pdf.multi_cell(0, 6, "No se han detectado protecciones destacables en la configuracion perimetral externa.")
 
+   
     # ==========================================
     # PÁGINA 4: PLAN DE ACCIÓN Y LEGAL
     # ==========================================
@@ -1344,6 +1419,10 @@ def crear_pdf(dominio, resultados):
         acciones_alta.append("Parchear urgentemente las vulnerabilidades CVE CRITICAS detectadas en el software del servidor. Riesgo de compromiso total del sistema.")
     if "CVE" in texto_resultados and "[ALTO]" in texto_resultados:
         acciones_alta.append("Revisar y parchear las vulnerabilidades CVE de severidad ALTA detectadas. Consultar el portal NVD/MITRE para los parches oficiales.")
+    if "Takeover" in texto_resultados and "CONFIRMADO" in texto_resultados:
+        acciones_alta.append("Reclamar o eliminar los subdominios vulnerables a takeover inmediatamente.")
+    if "Fuga Critica" in texto_resultados:
+        acciones_alta.append("Eliminar urgentemente las credenciales expuestas en el codigo fuente y rotarlas inmediatamente.")
 
     # Media prioridad
     if "HSTS" in texto_resultados:
@@ -1376,6 +1455,18 @@ def crear_pdf(dominio, resultados):
         acciones_media.append("Tener en cuenta las vulnerabilidades CVE de severidad BAJA detectadas en futuras actualizaciones.")
     if "robots.txt" in texto_resultados and "accesible" in texto_resultados:
         acciones_media.append("Revisar el archivo robots.txt para asegurarse de que no revela rutas privadas sensibles.")    
+    if "Rate Limiting" in texto_resultados and "Ausente" in texto_resultados:
+        acciones_media.append("Implementar rate limiting en los endpoints de login para proteger contra ataques de fuerza bruta.")
+    if "CORP" in texto_resultados and "Ausente" in texto_resultados:
+        acciones_media.append("Configurar Cross-Origin-Resource-Policy para evitar que recursos sean cargados por sitios externos.")
+    if "Cookie Insegura" in texto_resultados:
+        acciones_media.append("Configurar los flags Secure, HttpOnly y SameSite en todas las cookies de sesion.")
+    if "API" in texto_resultados and "Expuesta" in texto_resultados:
+        acciones_media.append("Proteger los endpoints de API con autenticacion. Implementar API keys o tokens JWT.")
+    if "WAF" in texto_resultados and "No Detectado" in texto_resultados:
+        acciones_media.append("Verificar la configuracion del WAF y considerar implementar Cloudflare o similar.")
+    if "FTP" in texto_resultados and "Abierto" in texto_resultados:
+        acciones_media.append("Deshabilitar el servicio FTP o reemplazarlo por SFTP. FTP transmite credenciales en texto plano.")
 
     if not acciones_alta:
         acciones_alta.append("No se han detectado vulnerabilidades criticas que requieran accion inmediata.")
@@ -1952,6 +2043,9 @@ with menu_dashboard:
                                 else "🔬 Auditoría OWASP" if incluir_owasp
                                 else "🕵️ OSINT / DNS y huella HTTP…"
                             )
+                            if st.session_state.get("escaneo_en_curso"):
+                                st.stop()
+                            st.session_state["escaneo_en_curso"] = True
                             with st.status(f"Iniciando análisis real sobre {dom}...") as s:
                                 st.write(msg_status)
                                 resultados_auditoria = escanear_objetivo_real(
@@ -2016,6 +2110,7 @@ with menu_dashboard:
                                 st.session_state["escaneo_actual_id"] = _id_reporte_desde_fila(nuevo_escaneo)
                                 _sincronizar_derecho_pdf_en_sesion(nuevo_escaneo)
 
+                                st.session_state["escaneo_en_curso"] = False
                                 st.rerun()
         else:
             st.warning("⚠️ Escribe un dominio primero para poder iniciar el escaneo.")
@@ -2177,22 +2272,23 @@ with menu_dashboard:
             col_g, col_t = st.columns([1, 1], gap="large")
             with col_g:
                 fallos = [r for r in resultados if 
-                    ("[CRITICO]" in r or "[ALERTA]" in r or "[ALTO]" in r or "[MEDIO]" in r or 
-                     "Falta" in r or "Protocolo" in r or "Cifrado" in r or "Version Antigua" in r or 
-                     "expuesta" in r or
-                     ("Fuzzing" in r and ("[CRÍTICO]" in r or "[ALTO]" in r or "[MEDIO]" in r)) or
-                     ("CVE" in r and ("[CRITICO]" in r or "[ALTO]" in r or "[MEDIO]" in r)) or
-                     ("Fichero" in r and "CRÍTICO" in r and "accesible" in r and "INFO" not in r))
-                    and "No se detectaron" not in r
-                    and "No se detectó" not in r
-                    and "Deshabilitado" not in r
-                    and "[INFO]" not in r
-                    ]
-                # 1. Conteo preciso basado en tus emojis
-                crit_count = sum(1 for r in fallos if "🔴" in r or "🚨" in r or "[CRITICO]" in r or "[ALTO]" in r)
-                med_count = sum(1 for r in fallos if "⚠️" in r or "🟡" in r or "[MEDIO]" in r or "Vulnerabilidad Media" in r)
-                
-                # 2. Nueva lógica de puntos: Media solo resta 5
+                 ("[CRITICO]" in r or "[ALERTA]" in r or "[ALTO]" in r or "[MEDIO]" in r or 
+                 "Falta" in r or "Protocolo" in r or "Cifrado" in r or "Version Antigua" in r or 
+                 "expuesta" in r or "Ausente" in r or "Insegura" in r or "Peligrosos" in r or
+                 "Takeover" in r or "Fuga" in r or "CORS Mal" in r or "Confirmado" in r or
+                 "Detectado" in r or
+                 ("Fuzzing" in r and ("[CRÍTICO]" in r or "[ALTO]" in r or "[MEDIO]" in r)) or
+                 ("CVE" in r and ("[CRITICO]" in r or "[ALTO]" in r or "[MEDIO]" in r)) or
+                 ("Fichero" in r and "CRÍTICO" in r and "accesible" in r and "INFO" not in r))
+                 and "No se detectaron" not in r
+                 and "No se detectó" not in r
+                 and "Deshabilitado" not in r
+                 and "[INFO]" not in r
+                 and "✅" not in r
+                ]
+                fallos_dashboard, _, _ = _clasificar_hallazgos_pdf(_preparar_resultados_pdf(resultados))
+                crit_count = sum(1 for r in fallos_dashboard if any(t in r for t in ('[CRITICO]', '[ALERTA]', '[ALTO]')))
+                med_count = sum(1 for r in fallos_dashboard if '[MEDIO]' in r or 'Vulnerabilidad Media' in r)
                 puntos_a_restar = (crit_count * 15) + (med_count * 7)
                 nota_final = 100 - puntos_a_restar
                 

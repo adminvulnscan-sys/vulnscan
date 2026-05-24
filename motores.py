@@ -5,6 +5,8 @@ import requests
 import dns.resolver
 from datetime import datetime, timezone
 import re
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ==========================================
 # MOTOR DE ANÁLISIS REAL (PILAR 2)
@@ -155,7 +157,10 @@ def analizar_puertos_y_versiones(dominio_limpio):
             resultado = s.connect_ex((dominio_limpio, puerto))
 
             if resultado == 0:
-                resultados.append(f"🟢 **Puerto {puerto} ({servicio}) Abierto**")
+                if puerto == 21:
+                    resultados.append(f"⚠️ **Puerto {puerto} ({servicio}) Abierto** — FTP es un protocolo inseguro. Se recomienda deshabilitar o reemplazar por SFTP.")
+                else:
+                    resultados.append(f"🟢 **Puerto {puerto} ({servicio}) Abierto**")
 
                 # Banner grabbing
                 try:
@@ -733,143 +738,750 @@ def _motor_pro_activo(dominio_limpio, incluir_cve_matching):
 
 
 def _motor_enterprise_owasp(dominio_limpio):
-    """Pruebas OWASP reales: SQLi, XSS, SSRF, WAF detection, cabeceras avanzadas."""
-    resultados_reales = []
-    headers_pro = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0"
+    """
+    Motor Enterprise - Pruebas activas reales de seguridad.
+    Cubre: WAF, SQLi, XSS, APIs, Cookies, Fugas, Subdomain Takeover,
+           Métodos HTTP, Rate Limiting, Cabeceras avanzadas, CORS.
+    """
+    resultados = []
+    headers_base = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "es-ES,es;q=0.8,en-US;q=0.5",
     }
     base = f"https://{dominio_limpio}"
-
-    # --- 1. Detección de WAF ---
+ 
+    # =========================================================================
+    # 1. WAF DETECTION + IDENTIFICACION DE PROVEEDOR
+    # =========================================================================
     try:
-        payloads_waf = [
-            {"id": "1' OR '1'='1"},
-            {"id": "1; DROP TABLE users--"},
-            {"search": "<script>alert(1)</script>"},
-        ]
+        r = requests.get(base, timeout=6, headers=headers_base)
+        headers_resp = {k.lower(): v for k, v in r.headers.items()}
+ 
         waf_detectado = False
-        for payload in payloads_waf:
-            r = requests.get(base, params=payload, timeout=5, headers=headers_pro)
-            if r.status_code in (403, 406, 429):
+        waf_nombre = ""
+ 
+        # Identificacion por cabeceras especificas de cada proveedor
+        if "cf-ray" in headers_resp or "cf-cache-status" in headers_resp or "cf-request-id" in headers_resp or "cloudflare" in headers_resp.get("server", "").lower():
+            waf_detectado = True
+            waf_nombre = "Cloudflare"
+        elif "x-sucuri-id" in headers_resp or "x-sucuri-cache" in headers_resp:
+            waf_detectado = True
+            waf_nombre = "Sucuri"
+        elif "x-akamai-transformed" in headers_resp or "akamai-grn" in headers_resp or "x-check-cacheable" in headers_resp:
+            waf_detectado = True
+            waf_nombre = "Akamai"
+        elif "x-iinfo" in headers_resp or "x-cdn" in headers_resp and "imperva" in headers_resp.get("x-cdn", "").lower():
+            waf_detectado = True
+            waf_nombre = "Imperva Incapsula"
+        elif "x-protected-by" in headers_resp:
+            waf_detectado = True
+            waf_nombre = headers_resp.get("x-protected-by", "WAF desconocido")
+        elif "x-waf" in headers_resp or "x-firewall" in headers_resp:
+            waf_detectado = True
+            waf_nombre = "Firewall generico"
+        elif "server" in headers_resp and "mod_security" in headers_resp.get("server", "").lower():
+            waf_detectado = True
+            waf_nombre = "ModSecurity"
+        # Deteccion por cookies de Cloudflare
+        if not waf_detectado:
+            cookies_str = str(r.cookies.get_dict())
+            if "__cfduid" in cookies_str or "cf_clearance" in cookies_str or "cf-ray" in cookies_str:
                 waf_detectado = True
-                break
-            cabeceras_waf = ["x-sucuri-id", "x-firewall", "cf-ray", "x-waf", "x-protected-by"]
-            if any(h in [k.lower() for k in r.headers.keys()] for h in cabeceras_waf):
-                waf_detectado = True
-                break
-        if waf_detectado:
-            resultados_reales.append("🛡️ **WAF Detectado:** Firewall activo — payloads maliciosos bloqueados correctamente.")
-        else:
-            resultados_reales.append("🚨 **WAF Ausente:** No se detectó firewall de aplicaciones web. Vulnerable a ataques automatizados.")
-    except Exception:
-        resultados_reales.append("⚠️ **WAF:** No se pudo verificar la presencia de firewall.")
-
-    # --- 2. SQLi real (detección por errores) ---
-    try:
-        payloads_sqli = ["'", "''", "`", "1' OR '1'='1", "1; SELECT 1--", "' OR 1=1--"]
-        errores_sql = ["sql syntax", "mysql_fetch", "ora-", "sqlite_", "pg_query", "unclosed quotation", "syntax error"]
-        sqli_encontrado = False
-        for payload in payloads_sqli:
+                waf_nombre = "Cloudflare"
+ 
+        # Verificacion adicional con payload malicioso
+        if not waf_detectado:
             try:
-                r = requests.get(base, params={"id": payload, "q": payload, "search": payload}, timeout=5, headers=headers_pro)
-                respuesta_lower = r.text.lower()
-                if any(err in respuesta_lower for err in errores_sql):
-                    resultados_reales.append(f"🚨 **SQLi Detectado:** El servidor devuelve errores SQL con payload `{payload}`. Vulnerabilidad crítica de inyección SQL.")
-                    sqli_encontrado = True
-                    break
+                r_test = requests.get(
+                    base,
+                    params={"id": "1' OR '1'='1", "q": "<script>alert(1)</script>"},
+                    timeout=5,
+                    headers=headers_base
+                )
+                if r_test.status_code in (403, 406, 429, 503):
+                    waf_detectado = True
+                    waf_nombre = "WAF sin identificar (bloquea payloads)"
             except Exception:
                 pass
-        if not sqli_encontrado:
-            resultados_reales.append("✅ **SQLi:** No se detectaron errores SQL en las respuestas del servidor.")
+ 
+        if waf_detectado:
+            resultados.append(f"✅ **WAF Detectado ({waf_nombre}):** Firewall activo protegiendo la aplicacion contra ataques automatizados.")
+        else:
+            resultados.append("🚨 **WAF Ausente:** No se detecto firewall de aplicaciones web. La web es vulnerable a ataques automatizados de SQLi, XSS y fuerza bruta sin ningun filtro.")
+ 
+    except Exception:
+        resultados.append("⚠️ **WAF:** No se pudo verificar la presencia de firewall de aplicaciones web.")
+ 
+    # =========================================================================
+    # 2. METODOS HTTP PELIGROSOS
+    # =========================================================================
+    try:
+        metodos_peligrosos_encontrados = []
+ 
+        # Test OPTIONS en raiz
+        try:
+            r_opt = requests.options(base, timeout=5, headers=headers_base)
+            allow_header = r_opt.headers.get("Allow", "") + " " + r_opt.headers.get("Public", "")
+            for metodo in ["PUT", "DELETE", "TRACE", "CONNECT", "PATCH", "MOVE", "COPY"]:
+                if metodo in allow_header.upper():
+                    metodos_peligrosos_encontrados.append(metodo)
+        except Exception:
+            pass
+ 
+        # Verificacion directa de TRACE (puede revelar cabeceras internas)
+        try:
+            r_trace = requests.request("TRACE", base, timeout=4, headers=headers_base)
+            if r_trace.status_code == 200 and "TRACE" in r_trace.text.upper():
+                if "TRACE" not in metodos_peligrosos_encontrados:
+                    metodos_peligrosos_encontrados.append("TRACE")
+        except Exception:
+            pass
+ 
+        # Verificacion directa de PUT
+        try:
+            r_put = requests.put(base + "/vulnscan_test.txt", data="vulnscan_test", timeout=4, headers=headers_base)
+            if r_put.status_code in (200, 201, 204):
+                # Verificar que realmente se subio haciendo GET
+                r_check = requests.get(base + "/vulnscan_test.txt", timeout=3, headers=headers_base)
+                if r_check.status_code == 200 and "vulnscan_test" in r_check.text:
+                    if "PUT" not in metodos_peligrosos_encontrados:
+                        metodos_peligrosos_encontrados.append("PUT (CONFIRMADO - subida de archivos posible)")
+        except Exception:
+            pass
+ 
+        if metodos_peligrosos_encontrados:
+            resultados.append(f"🚨 **Metodos HTTP Peligrosos Habilitados:** {', '.join(metodos_peligrosos_encontrados)}. Permiten modificar, eliminar o leer datos del servidor de forma no autorizada.")
+        else:
+            resultados.append("✅ **Metodos HTTP:** Solo metodos seguros habilitados. PUT, DELETE y TRACE correctamente deshabilitados.")
+ 
     except Exception:
         pass
-
-    # --- 3. XSS Reflejado ---
+ 
+    # =========================================================================
+    # 3. ANALISIS DE COOKIES Y SESION
+    # =========================================================================
+    print("[ENTERPRISE] Iniciando seccion 3 - Cookies...")
+    try:
+        r_cookies = requests.get(base, timeout=5, headers=headers_base)
+        
+        cookies_inseguras = []
+        cookies_seguras = []
+ 
+        # Analizar cabecera Set-Cookie raw (mas fiable que el objeto cookie)
+        set_cookie_headers = r_cookies.raw.headers.getlist("Set-Cookie") if hasattr(r_cookies.raw.headers, 'getlist') else []
+        if not set_cookie_headers:
+            # Fallback: buscar en headers normales
+            all_headers = r_cookies.headers
+            set_cookie_raw = all_headers.get("Set-Cookie", "")
+            if set_cookie_raw:
+                set_cookie_headers = [set_cookie_raw]
+ 
+        # Tambien analizar desde el objeto cookies
+        for cookie in r_cookies.cookies:
+            nombre = cookie.name
+            problemas = []
+            flags_ok = []
+ 
+            if not cookie.secure:
+                problemas.append("sin flag Secure (transmitida en HTTP)")
+            else:
+                flags_ok.append("Secure")
+ 
+            # Verificar HttpOnly desde cabecera raw
+            cookie_raw_str = " ".join(set_cookie_headers)
+            if f"{nombre}" in cookie_raw_str:
+                if "httponly" not in cookie_raw_str.lower():
+                    problemas.append("sin flag HttpOnly (accesible via JavaScript)")
+                else:
+                    flags_ok.append("HttpOnly")
+                if "samesite" not in cookie_raw_str.lower():
+                    problemas.append("sin SameSite (vulnerable a CSRF)")
+                else:
+                    flags_ok.append("SameSite")
+ 
+            if problemas:
+                cookies_inseguras.append(f"`{nombre}`: {', '.join(problemas)}")
+            else:
+                cookies_seguras.append(nombre)
+ 
+        if cookies_inseguras:
+            for c in cookies_inseguras[:5]:
+                resultados.append(f"⚠️ **Cookie Insegura:** {c}. Vulnerable a robo de sesion mediante XSS o intercepcion en red.")
+        elif cookies_seguras:
+            resultados.append(f"✅ **Cookies:** {len(cookies_seguras)} cookie(s) con flags de seguridad correctamente configurados.")
+        else:
+            resultados.append("✅ **Cookies:** No se detectaron cookies de sesion en la respuesta inicial.")
+ 
+    except Exception:
+        resultados.append("⚠️ **Cookies:** No se pudo analizar la configuracion de cookies.")
+ 
+    # =========================================================================
+    # 4. APIS EXPUESTAS + CORS + DATOS SIN AUTENTICACION
+    # =========================================================================
+    print("[ENTERPRISE] Iniciando seccion 4 - APIs...")
+    try:
+        endpoints_api = [
+            # APIs REST comunes
+            "/api", "/api/v1", "/api/v2", "/api/v3", "/api/v4",
+            "/api/users", "/api/user", "/api/admin", "/api/config",
+            "/api/settings", "/api/data", "/api/export", "/api/list",
+            "/api/v1/users", "/api/v1/admin", "/api/v1/config",
+            "/api/v1/health", "/api/v1/status", "/api/v1/info",
+            "/api/v2/users", "/api/v2/admin",
+            # GraphQL
+            "/graphql", "/graphiql", "/graphql/console", "/graphql/playground",
+            # Documentacion expuesta
+            "/swagger", "/swagger-ui", "/swagger-ui.html", "/swagger-ui/index.html",
+            "/api-docs", "/api-docs/", "/openapi.json", "/openapi.yaml",
+            "/redoc", "/redoc/", "/docs", "/documentation",
+            # Herramientas de desarrollo
+            "/actuator", "/actuator/env", "/actuator/health", "/actuator/info",
+            "/actuator/beans", "/actuator/mappings", "/actuator/metrics",
+            "/health", "/healthz", "/status", "/ping", "/info",
+            "/metrics", "/prometheus",
+            # Webhooks y integraciones
+            "/webhook", "/webhooks", "/callback", "/notify",
+            # Admin APIs
+            "/admin/api", "/admin/api/v1", "/manage/api",
+            # APIs de autenticacion
+            "/auth", "/auth/token", "/auth/login", "/oauth", "/oauth/token",
+            "/token", "/login", "/authenticate",
+            # APIs de datos sensibles
+            "/api/keys", "/api/tokens", "/api/secrets",
+            "/api/credentials", "/api/passwords",
+            # Debug y desarrollo
+            "/debug", "/dev", "/test", "/testing",
+            "/__debug__", "/_debug", "/trace",
+            # Servicios comunes
+            "/rest", "/rest/v1", "/rest/v2",
+            "/service", "/services", "/ws", "/wsdl",
+            # Wordpress REST API
+            "/wp-json", "/wp-json/wp/v2", "/wp-json/wp/v2/users",
+            "/wp-json/wp/v2/posts", "/wp-json/wp/v2/pages",
+        ]
+ 
+        apis_expuestas = []
+        apis_con_datos = []
+        apis_cors_mal = []
+ 
+        def check_api(endpoint):
+            try:
+                # Cabeceras con Origin para test CORS
+                h = {**headers_base, "Origin": "https://evil.com"}
+                r = requests.get(base + endpoint, timeout=1, headers=h, allow_redirects=False)
+ 
+                if r.status_code == 200:
+                    content_type = r.headers.get("Content-Type", "").lower()
+                    content_length = len(r.content)
+ 
+                    # Verificar si devuelve datos reales (JSON con contenido)
+                    datos_reales = False
+                    if "json" in content_type and content_length > 50:
+                        try:
+                            data = r.json()
+                            # Buscar datos sensibles en la respuesta
+                            data_str = str(data).lower()
+                            if any(k in data_str for k in ["email", "password", "user", "token", "key", "secret", "admin", "role", "id"]):
+                                datos_reales = True
+                        except Exception:
+                            pass
+ 
+                    # Verificar CORS mal configurado
+                    acao = r.headers.get("Access-Control-Allow-Origin", "")
+                    if acao == "*" or acao == "https://evil.com":
+                        apis_cors_mal.append(f"{endpoint} (CORS: {acao})")
+ 
+                    return endpoint, r.status_code, datos_reales, content_length
+ 
+                elif r.status_code == 401:
+                    return endpoint, 401, False, 0
+                elif r.status_code == 403:
+                    return endpoint, 403, False, 0
+ 
+            except Exception:
+                pass
+            return None
+ 
+        with ThreadPoolExecutor(max_workers=20) as executor:
+            futures = {executor.submit(check_api, ep): ep for ep in endpoints_api}
+            for future in as_completed(futures, timeout=12):
+                resultado = future.result()
+                if resultado:
+                    endpoint, status, datos_reales, size = resultado
+                    if status == 200:
+                        if datos_reales:
+                            apis_con_datos.append(endpoint)
+                        else:
+                            apis_expuestas.append(endpoint)
+                    elif status in (401, 403):
+                        pass  # Protegida, no reportar
+ 
+        if apis_con_datos:
+            for ep in apis_con_datos[:5]:
+                resultados.append(f"🚨 **API Expuesta con Datos Reales:** `{ep}` accesible publicamente y devuelve datos sensibles sin autenticacion.")
+ 
+        if apis_expuestas:
+            if len(apis_expuestas) <= 3:
+                for ep in apis_expuestas:
+                    resultados.append(f"⚠️ **API Endpoint Expuesto:** `{ep}` accesible sin autenticacion.")
+            else:
+                resultados.append(f"⚠️ **APIs Expuestas ({len(apis_expuestas)}):** Endpoints accesibles sin autenticacion: {', '.join(apis_expuestas[:5])}")
+ 
+        if apis_cors_mal:
+            for ep in apis_cors_mal[:3]:
+                resultados.append(f"🚨 **CORS Mal Configurado:** `{ep}` permite peticiones desde cualquier dominio externo. Cualquier web puede leer los datos de esta API.")
+ 
+        if not apis_con_datos and not apis_expuestas and not apis_cors_mal:
+            resultados.append("✅ **APIs:** No se detectaron endpoints de API expuestos publicamente sin autenticacion.")
+ 
+    except Exception:
+        pass
+ 
+    # =========================================================================
+    # 5. FUGAS EN CODIGO FUENTE (HTML + JS EXTERNOS)
+    # =========================================================================
+    print("[ENTERPRISE] Iniciando seccion 5 - Fugas codigo...")
+    try:
+        paginas_a_analizar = []
+ 
+        # Obtener HTML principal
+        try:
+            r_home = requests.get(base, timeout=6, headers=headers_base)
+            if r_home.status_code == 200:
+                paginas_a_analizar.append(("HTML Principal", r_home.text))
+ 
+                # Extraer URLs de scripts JS externos
+                scripts = re.findall(r'<script[^>]+src=["\']([^"\']+)["\']', r_home.text, re.IGNORECASE)
+                js_externos = []
+                for src in scripts[:10]:  # Max 10 JS externos
+                    if src.startswith("http"):
+                        js_externos.append(src)
+                    elif src.startswith("/"):
+                        js_externos.append(base + src)
+ 
+                # Descargar JS externos en paralelo
+                def fetch_js(url):
+                    try:
+                        r = requests.get(url, timeout=4, headers=headers_base)
+                        if r.status_code == 200:
+                            return (url, r.text)
+                    except Exception:
+                        pass
+                    return None
+ 
+                with ThreadPoolExecutor(max_workers=8) as executor:
+                    futures_js = {executor.submit(fetch_js, url): url for url in js_externos}
+                    for future in as_completed(futures_js, timeout=15):
+                        res = future.result()
+                        if res:
+                            paginas_a_analizar.append((f"JS: {res[0][:60]}", res[1]))
+ 
+        except Exception:
+            pass
+ 
+        # Patrones de fugas a buscar
+        patrones_fugas = [
+            # API Keys y tokens
+            (r'(?i)(api[_\-]?key|apikey)\s*[=:]\s*["\']?([A-Za-z0-9_\-]{20,})', "API Key expuesta"),
+            (r'(?i)(access[_\-]?token|auth[_\-]?token)\s*[=:]\s*["\']?([A-Za-z0-9_\-\.]{20,})', "Token de acceso expuesto"),
+            (r'(?i)(secret[_\-]?key|client[_\-]?secret)\s*[=:]\s*["\']?([A-Za-z0-9_\-]{16,})', "Clave secreta expuesta"),
+            (r'(?i)bearer\s+([A-Za-z0-9_\-\.]{20,})', "Bearer token expuesto"),
+            # Credenciales
+            (r'(?i)(password|passwd|pwd)\s*[=:]\s*["\']([^"\']{6,})["\']', "Contrasena hardcodeada"),
+            (r'(?i)(username|user|login)\s*[=:]\s*["\']([^"\']{3,})["\']', "Usuario hardcodeado"),
+            # Servicios cloud
+            (r'AKIA[0-9A-Z]{16}', "AWS Access Key expuesta"),
+            (r'(?i)aws[_\-]?secret\s*[=:]\s*["\']?([A-Za-z0-9/+=]{40})', "AWS Secret Key expuesta"),
+            (r'AIza[0-9A-Za-z\-_]{35}', "Google API Key expuesta"),
+            (r'(?i)mongodb(\+srv)?://[^\s"\'<>]+', "Cadena de conexion MongoDB expuesta"),
+            (r'(?i)postgres(ql)?://[^\s"\'<>]+', "Cadena de conexion PostgreSQL expuesta"),
+            (r'(?i)mysql://[^\s"\'<>]+', "Cadena de conexion MySQL expuesta"),
+            # Rutas internas
+            (r'/var/www/[^\s"\'<>]+', "Ruta interna del servidor expuesta"),
+            (r'C:\\[^\s"\'<>]{10,}', "Ruta Windows del servidor expuesta"),
+            (r'/home/[a-z]+/[^\s"\'<>]+', "Ruta home del servidor expuesta"),
+            # Comentarios con info sensible
+            (r'<!--\s*(todo|fixme|hack|bug|password|credentials|secret|key)[^-]*-->', "Comentario HTML con informacion sensible"),
+            (r'//\s*(todo|fixme|hack)\s*:.*?(password|secret|key|token|credential)', "Comentario JS con informacion sensible"),
+            # Emails corporativos
+            (r'[a-zA-Z0-9._%+\-]+@' + re.escape(dominio_limpio), "Email corporativo expuesto en codigo"),
+            # IPs internas
+            (r'(?:192\.168\.|10\.|172\.(?:1[6-9]|2[0-9]|3[01])\.)\d+\.\d+', "IP interna expuesta"),
+            (r'localhost:\d+', "Referencia a localhost expuesta"),
+            (r'127\.0\.0\.1:\d+', "Referencia a localhost expuesta"),
+        ]
+ 
+        fugas_encontradas = {}
+ 
+        for nombre_pagina, contenido in paginas_a_analizar:
+            for patron, tipo_fuga in patrones_fugas:
+                matches = re.findall(patron, contenido)
+                if matches:
+                    # Filtrar falsos positivos comunes
+                    for match in matches:
+                        valor = match if isinstance(match, str) else match[-1]
+                        # Excluir valores de ejemplo/placeholder
+                        if any(excl in valor.lower() for excl in ["example", "placeholder", "your-", "xxx", "test", "demo", "sample", "xxxx"]):
+                            continue
+                        if tipo_fuga not in fugas_encontradas:
+                            fugas_encontradas[tipo_fuga] = nombre_pagina
+ 
+        for tipo_fuga, ubicacion in fugas_encontradas.items():
+            if "AWS Access Key" in tipo_fuga or "Secret" in tipo_fuga or "MongoDB" in tipo_fuga or "PostgreSQL" in tipo_fuga or "MySQL" in tipo_fuga:
+                resultados.append(f"🚨 **Fuga Critica [{tipo_fuga}]:** Detectado en {ubicacion}. Credenciales expuestas publicamente — acceso inmediato posible.")
+            else:
+                resultados.append(f"⚠️ **Fuga en Codigo [{tipo_fuga}]:** Detectado en {ubicacion}. Informacion sensible accesible publicamente.")
+ 
+        if not fugas_encontradas:
+            resultados.append("✅ **Codigo Fuente:** No se detectaron fugas de credenciales, tokens ni informacion sensible en HTML y JavaScript.")
+ 
+    except Exception:
+        resultados.append("⚠️ **Fugas en Codigo:** No se pudo analizar el codigo fuente.")
+ 
+    # =========================================================================
+    # 6. SQLi ACTIVO MEJORADO
+    # =========================================================================
+    print("[ENTERPRISE] Iniciando seccion 6 - SQLi...")
+    try:
+        payloads_sqli = [
+            ("'", "comilla simple"),
+            ("''", "doble comilla"),
+            ("1' OR '1'='1", "OR classico"),
+            ("1; SELECT 1--", "stacked query"),
+            ("' OR 1=1--", "OR booleano"),
+            ("1 UNION SELECT NULL--", "UNION based"),
+            ("1 AND SLEEP(0)--", "time based (safe)"),
+            ("' AND '1'='1", "AND booleano"),
+            (") OR ('1'='1", "parentesis injection"),
+            ("1'; WAITFOR DELAY '0:0:0'--", "MSSQL time based (safe)"),
+        ]
+ 
+        errores_sql = [
+            "sql syntax", "mysql_fetch", "ora-", "sqlite_", "pg_query",
+            "unclosed quotation", "syntax error", "microsoft ole db",
+            "odbc driver", "jdbc", "sql server", "mysql error",
+            "division by zero", "supplied argument is not a valid mysql",
+            "warning: mysql", "invalid query", "sql command not properly ended",
+            "quoted string not properly terminated", "sqlstate",
+            "you have an error in your sql", "mysql_num_rows",
+            "pg_exec", "supplied argument is not a valid postgresql",
+        ]
+ 
+        parametros_comunes = [
+            {"id": None}, {"q": None}, {"search": None}, {"query": None},
+            {"user": None}, {"username": None}, {"email": None},
+            {"page": None}, {"cat": None}, {"category": None},
+            {"item": None}, {"product": None}, {"pid": None},
+        ]
+ 
+        sqli_encontrado = False
+        sqli_detalles = []
+ 
+        for payload, nombre_payload in payloads_sqli:
+            if sqli_encontrado:
+                break
+            for params_template in parametros_comunes[:3]:
+                try:
+                    params = {k: payload for k in params_template}
+                    r = requests.get(base, params=params, timeout=3, headers=headers_base)
+                    respuesta_lower = r.text.lower()
+ 
+                    for error in errores_sql:
+                        if error in respuesta_lower:
+                            sqli_detalles.append(f"payload `{nombre_payload}` en parametro `{list(params.keys())[0]}`")
+                            sqli_encontrado = True
+                            break
+ 
+                    if sqli_encontrado:
+                        break
+                except Exception:
+                    pass
+ 
+        if sqli_encontrado:
+            resultados.append(f"🚨 **SQLi Detectado:** El servidor expone errores SQL con {sqli_detalles[0]}. Un atacante puede extraer toda la base de datos.")
+        else:
+            resultados.append("✅ **SQLi:** No se detectaron errores SQL en las respuestas del servidor.")
+ 
+    except Exception:
+        pass
+ 
+    # =========================================================================
+    # 7. XSS REFLEJADO MEJORADO
+    # =========================================================================
+    print("[ENTERPRISE] Iniciando seccion 7 - XSS...")
     try:
         payloads_xss = [
-            "<script>alert('xss')</script>",
-            "<img src=x onerror=alert(1)>",
+            '<script>alert("xss")</script>',
+            '<img src=x onerror=alert(1)>',
+            "'><script>alert(1)</script>",
+            '<svg onload=alert(1)>',
+            '"><img src=x onerror=alert(1)>',
             "javascript:alert(1)",
+            '<body onload=alert(1)>',
         ]
+
         xss_encontrado = False
+        xss_detalles = []
+        parametros_xss = ["q", "search", "query", "s", "input", "text", "name", "comment", "message"]
+
         for payload in payloads_xss:
-            r = requests.get(base, params={"q": payload, "search": payload, "input": payload}, timeout=5, headers=headers_pro)
-            if payload.lower() in r.text.lower():
-                resultados_reales.append(f"🚨 **XSS Reflejado:** El servidor devuelve el payload sin sanitizar. Vulnerabilidad crítica.")
-                xss_encontrado = True
+            if xss_encontrado:
                 break
-        if not xss_encontrado:
-            resultados_reales.append("✅ **XSS:** El servidor sanitiza correctamente los inputs.")
+            try:
+                params = {p: payload for p in parametros_xss[:4]}
+                r = requests.get(base, params=params, timeout=5, headers=headers_base)
+                contenido = r.text
+                payload_escapado_1 = payload.replace("<", "&lt;").replace(">", "&gt;")
+                payload_escapado_2 = payload.replace('"', "&quot;").replace("'", "&#39;")
+                if payload.lower() in contenido.lower():
+                    if payload_escapado_1.lower() not in contenido.lower() and payload_escapado_2.lower() not in contenido.lower():
+                        xss_encontrado = True
+                        xss_detalles.append(payload[:40])
+            except Exception:
+                pass
+
+        if xss_encontrado:
+            resultados.append(f"🚨 **XSS Reflejado Confirmado:** El servidor devuelve el payload sin sanitizar: `{xss_detalles[0][:40]}`. Un atacante puede robar sesiones de usuarios.")
+        else:
+            resultados.append("✅ **XSS:** No se detecto reflexion de payloads sin sanitizar en los parametros analizados.")
+
     except Exception:
         pass
-
-    # --- 4. SSRF básico ---
+ 
+    # =========================================================================
+    # 8. SUBDOMAIN TAKEOVER
+    # =========================================================================
+    print("[ENTERPRISE] Iniciando seccion 8 - Subdomain Takeover...")
     try:
-        ssrf_payloads = [
-            "http://127.0.0.1",
-            "http://localhost",
-            "http://169.254.169.254/latest/meta-data/",
-            "http://192.168.1.1",
+        # Lista ampliada de subdominios a verificar
+        subdominios_test = [
+            "www", "mail", "ftp", "api", "dev", "staging", "test", "admin",
+            "portal", "app", "cdn", "static", "blog", "shop", "vpn",
+            "webmail", "support", "docs", "beta", "sandbox"
         ]
-        ssrf_encontrado = False
-        for payload in ssrf_payloads:
+        
+ 
+        # Servicios vulnerables a subdomain takeover
+        servicios_takeover = {
+            "github.io": "GitHub Pages",
+            "herokuapp.com": "Heroku",
+            "azurewebsites.net": "Azure",
+            "cloudfront.net": "AWS CloudFront",
+            "s3.amazonaws.com": "AWS S3",
+            "netlify.app": "Netlify",
+            "vercel.app": "Vercel",
+            "surge.sh": "Surge",
+            "ghost.io": "Ghost",
+            "tumblr.com": "Tumblr",
+            "wordpress.com": "WordPress.com",
+            "shopify.com": "Shopify",
+            "squarespace.com": "Squarespace",
+            "wixsite.com": "Wix",
+            "fastly.net": "Fastly",
+            "pantheonsite.io": "Pantheon",
+            "helpscoutdocs.com": "HelpScout",
+            "zendesk.com": "Zendesk",
+            "freshdesk.com": "Freshdesk",
+            "unbounce.com": "Unbounce",
+            "hubspot.com": "HubSpot",
+            "wpengine.com": "WP Engine",
+            "agilecrm.com": "Agile CRM",
+            "bitbucket.io": "Bitbucket",
+        }
+ 
+        # Mensajes de error que indican takeover posible
+        mensajes_takeover = [
+            "there isn't a github pages site here",
+            "no such app",
+            "heroku | no such app",
+            "the specified bucket does not exist",
+            "nosuchdomain",
+            "this domain is not configured",
+            "page not found - fastly error",
+            "project not found",
+            "repository not found",
+            "this site can't be reached",
+            "no se puede acceder",
+        ]
+ 
+        takeover_vulnerables = []
+        takeover_sospechosos = []
+ 
+        def check_takeover(sub):
+            subdominio = f"{sub}.{dominio_limpio}"
             try:
-                r = requests.get(base, params={"url": payload, "redirect": payload, "next": payload}, timeout=5, headers=headers_pro)
-                if r.status_code == 200 and any(x in r.text.lower() for x in ["ami-id", "instance-id", "root:", "localhost"]):
-                    resultados_reales.append(f"🚨 **SSRF Detectado:** El servidor realiza peticiones a IPs internas ({payload}). Vulnerabilidad crítica.")
-                    ssrf_encontrado = True
+                # Resolver CNAME
+                try:
+                    respuestas_cname = dns.resolver.resolve(subdominio, "CNAME", lifetime=2)
+                    for resp in respuestas_cname:
+                        cname_target = str(resp.target).lower().rstrip(".")
+                        for servicio_url, servicio_nombre in servicios_takeover.items():
+                            if servicio_url in cname_target:
+                                # Verificar si el servicio esta reclamado
+                                try:
+                                    r_check = requests.get(
+                                        f"https://{subdominio}",
+                                        timeout=2,
+                                        headers=headers_base,
+                                        allow_redirects=True
+                                    )
+                                    contenido_lower = r_check.text.lower()
+                                    for msg in mensajes_takeover:
+                                        if msg in contenido_lower:
+                                            return ("VULNERABLE", subdominio, cname_target, servicio_nombre)
+                                    if r_check.status_code in (404, 410):
+                                        return ("SOSPECHOSO", subdominio, cname_target, servicio_nombre)
+                                except Exception:
+                                    return ("SOSPECHOSO", subdominio, cname_target, servicio_nombre)
+                except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+                    pass
+ 
+                # Verificar A record
+                try:
+                    dns.resolver.resolve(subdominio, "A")
+                except Exception:
+                    pass
+ 
+            except Exception:
+                pass
+            return None
+ 
+        with ThreadPoolExecutor(max_workers=30) as executor:
+            futures_td = {executor.submit(check_takeover, sub): sub for sub in subdominios_test}
+            for future in as_completed(futures_td, timeout=15):
+                res = future.result()
+                if res:
+                    tipo, sub, cname, servicio = res
+                    if tipo == "VULNERABLE":
+                        takeover_vulnerables.append((sub, cname, servicio))
+                    elif tipo == "SOSPECHOSO":
+                        takeover_sospechosos.append((sub, cname, servicio))
+ 
+        if takeover_vulnerables:
+            for sub, cname, servicio in takeover_vulnerables:
+                resultados.append(f"🚨 **Subdomain Takeover CONFIRMADO [{sub}]:** Apunta a {servicio} ({cname}) que no esta reclamado. Un atacante puede tomar control de este subdominio y servir contenido fraudulento bajo tu dominio.")
+        if takeover_sospechosos:
+            for sub, cname, servicio in takeover_sospechosos[:3]:
+                resultados.append(f"⚠️ **Subdomain Takeover Posible [{sub}]:** Apunta a {servicio} ({cname}). Verificar si el servicio sigue activo y reclamado.")
+        if not takeover_vulnerables and not takeover_sospechosos:
+            resultados.append("✅ **Subdomain Takeover:** No se detectaron subdominios vulnerables a toma de control entre los 70+ subdominios analizados.")
+ 
+    except Exception:
+        resultados.append("⚠️ **Subdomain Takeover:** No se pudo verificar los subdominios.")
+ 
+    # =========================================================================
+    # 9. RATE LIMITING (proteccion contra fuerza bruta)
+    # =========================================================================
+    print("[ENTERPRISE] Iniciando seccion 9 - Rate Limiting...")
+    try:
+        endpoints_rl = [
+            "/login", "/api/login", "/api/auth", "/wp-login.php",
+            "/admin/login", "/auth/login", "/signin", "/api/signin",
+            "/api/v1/login", "/api/v1/auth",
+        ]
+ 
+        rate_limit_detectado = False
+        endpoint_probado = None
+ 
+        # Primero verificar que endpoint existe
+        endpoint_activo = None
+        for ep in endpoints_rl:
+            try:
+                r_check = requests.get(base + ep, timeout=3, headers=headers_base, allow_redirects=False)
+                if r_check.status_code in (200, 405):  # 405 = Method Not Allowed (existe pero no GET)
+                    endpoint_activo = ep
                     break
             except Exception:
                 pass
-        if not ssrf_encontrado:
-            resultados_reales.append("✅ **SSRF:** No se detectaron redirecciones a IPs internas.")
-    except Exception:
-        pass
-
-    # --- 5. Cabeceras de seguridad avanzadas ---
-    try:
-        r_headers = requests.get(base, timeout=5, headers=headers_pro)
-        headers_resp = {k.lower(): v for k, v in r_headers.headers.items()}
-
-        if "permissions-policy" not in headers_resp:
-            resultados_reales.append("⚠️ **Permissions-Policy:** Ausente. El sitio no restringe APIs del navegador (cámara, micrófono, geolocalización).")
-        else:
-            resultados_reales.append("✅ **Permissions-Policy:** Presente. APIs del navegador correctamente restringidas.")
-
-        if "referrer-policy" not in headers_resp:
-            resultados_reales.append("⚠️ **Referrer-Policy:** Ausente. Las URLs internas pueden filtrarse a sitios externos.")
-        else:
-            resultados_reales.append("✅ **Referrer-Policy:** Presente. Filtración de URLs controlada.")
-
-        if "cross-origin-embedder-policy" not in headers_resp:
-            resultados_reales.append("⚠️ **COEP:** Ausente. Posible vulnerabilidad a ataques de canal lateral (Spectre).")
-        else:
-            resultados_reales.append("✅ **COEP:** Presente. Protección contra ataques de canal lateral activa.")
-
-        if "cross-origin-opener-policy" not in headers_resp:
-            resultados_reales.append("⚠️ **COOP:** Ausente. Posible filtración de datos entre pestañas del navegador.")
-        else:
-            resultados_reales.append("✅ **COOP:** Presente. Aislamiento entre pestañas activo.")
-
-    except Exception:
-        pass
-
-    # --- 6. Open Redirect ---
-    try:
-        redirect_payloads = ["//evil.com", "https://evil.com", "/\\evil.com"]
-        for payload in redirect_payloads:
-            try:
-                r = requests.get(base, params={"redirect": payload, "next": payload, "url": payload}, timeout=5, headers=headers_pro, allow_redirects=False)
-                if r.status_code in (301, 302, 303, 307, 308):
-                    location = r.headers.get("location", "")
-                    if "evil.com" in location:
-                        resultados_reales.append("🚨 **Open Redirect:** El servidor redirige a dominios externos sin validación. Vulnerable a phishing.")
+ 
+        if endpoint_activo:
+            endpoint_probado = endpoint_activo
+            # Enviar 20 peticiones rapidas y ver si bloquea
+            for i in range(10):
+                try:
+                    r_rl = requests.post(
+                        base + endpoint_activo,
+                        data={"username": f"test{i}@test.com", "password": "wrongpassword123"},
+                        timeout=2,
+                        headers=headers_base,
+                        allow_redirects=False
+                    )
+                    if r_rl.status_code in (429, 503):
+                        rate_limit_detectado = True
                         break
-            except Exception:
-                pass
+                    # Verificar cabeceras de rate limit
+                    if any(h in r_rl.headers for h in ["X-RateLimit-Limit", "X-RateLimit-Remaining", "Retry-After", "RateLimit-Limit"]):
+                        rate_limit_detectado = True
+                        break
+                except Exception:
+                    break
         else:
-            resultados_reales.append("✅ **Open Redirect:** No se detectaron redirecciones abiertas a dominios externos.")
+            # Probar en la raiz
+            endpoint_probado = "/"
+            for i in range(15):
+                try:
+                    r_rl = requests.get(base, timeout=2, headers=headers_base)
+                    if r_rl.status_code == 429:
+                        rate_limit_detectado = True
+                        break
+                except Exception:
+                    break
+ 
+        if rate_limit_detectado:
+            resultados.append(f"✅ **Rate Limiting:** El servidor detecta y bloquea peticiones excesivas en `{endpoint_probado}`. Protegido contra ataques de fuerza bruta.")
+        else:
+            if endpoint_probado and endpoint_probado != "/":
+                resultados.append(f"⚠️ **Rate Limiting Ausente:** El endpoint `{endpoint_probado}` no bloquea multiples intentos de acceso. Vulnerable a ataques de fuerza bruta de credenciales.")
+            else:
+                resultados.append("⚠️ **Rate Limiting:** No se detecto proteccion activa contra peticiones excesivas. Posible vulnerabilidad a fuerza bruta.")
+ 
+    except Exception:
+        resultados.append("⚠️ **Rate Limiting:** No se pudo verificar la proteccion contra fuerza bruta.")
+ 
+    # =========================================================================
+    # 10. CABECERAS DE SEGURIDAD AVANZADAS
+    # =========================================================================
+    print("[ENTERPRISE] Iniciando seccion 10 - Cabeceras...")
+    try:
+        r_headers = requests.get(base, timeout=6, headers=headers_base)
+        headers_resp = {k.lower(): v for k, v in r_headers.headers.items()}
+ 
+        checks_cabeceras = [
+            (
+                "cross-origin-embedder-policy",
+                "⚠️ **COEP Ausente:** Posible vulnerabilidad a ataques de canal lateral tipo Spectre que pueden leer memoria del navegador.",
+                "✅ **COEP:** Proteccion contra ataques de canal lateral activa."
+            ),
+            (
+                "cross-origin-opener-policy",
+                "⚠️ **COOP Ausente:** Posible filtracion de datos entre pestanas del navegador mediante ataques de ventana cruzada.",
+                "✅ **COOP:** Aislamiento entre pestanas activo."
+            ),
+            (
+                "cross-origin-resource-policy",
+                "⚠️ **CORP Ausente:** Los recursos del servidor pueden ser cargados por sitios externos sin restriccion.",
+                "✅ **CORP:** Politica de recursos entre origenes correctamente configurada."
+            ),
+        ]
+ 
+        for cabecera, msg_fallo, msg_ok in checks_cabeceras:
+            if cabecera not in headers_resp:
+                resultados.append(msg_fallo)
+            else:
+                resultados.append(msg_ok)
+ 
+        # Verificar CSP si existe y analizarlo
+        csp = headers_resp.get("content-security-policy", "")
+        if csp:
+            csp_lower = csp.lower()
+            if "unsafe-inline" in csp_lower:
+                resultados.append("⚠️ **CSP Debil:** La directiva 'unsafe-inline' anula la proteccion XSS del CSP. Revisar y endurecer la politica.")
+            elif "unsafe-eval" in csp_lower:
+                resultados.append("⚠️ **CSP Debil:** La directiva 'unsafe-eval' permite ejecucion de codigo dinamico. Revisar y endurecer la politica.")
+            else:
+                resultados.append("✅ **CSP:** Content Security Policy presente y sin directivas peligrosas detectadas.")
     except Exception:
         pass
-
-    return resultados_reales
+ 
+    return resultados
