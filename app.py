@@ -2560,7 +2560,7 @@ with menu_escaneos:
         - **Headers de Seguridad: Análisis de 6 cabeceras HTTP críticas (HSTS, CSP, X-Frame-Options y más).
         - **DNS & SSL:** Análisis de registros y caducidad de certificados.
         - **Reputación IP:** Comprobación en listas negras globales.
-        - ** CDN: Detección de protección mediante Cloudflare y otros CDNs.
+        - ** CDN:** Detección de protección mediante Cloudflare y otros CDNs.
         
         **Límites de la cuenta Gratis:**
         - 🎯 **Objetivos:** Máximo 3 dominios/mes.
