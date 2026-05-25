@@ -1470,7 +1470,7 @@ def crear_pdf(dominio, resultados):
 
     if not acciones_alta:
         acciones_alta.append("No se han detectado vulnerabilidades criticas que requieran accion inmediata.")
-    if not acciones_media:
+    if not acciones_media
         acciones_media.append("No se han detectado vulnerabilidades medias que requieran accion a corto plazo.")
 
     pdf.set_font("Helvetica", "B", 12)
@@ -2588,11 +2588,11 @@ with menu_escaneos:
         - **Port & Banner:** Mapeo de puertos y detección del software exacto.
         - **Fuzzing Web:** Búsqueda por fuerza bruta de directorios ocultos.
         - **CVE Matching:** Cruce automático de hallazgos con bases de datos.
-        - **SSL/TLS Profundo: Análisis de cipher suites, protocolos obsoletos (TLS 1.0/1.1) y firma SHA-1.
-        - **Ficheros Críticos: Detección de archivos sensibles expuestos (.env, .git, backups, configs).
-        - **OSINT Emails: Búsqueda de emails corporativos expuestos públicamente.
-        - **Fingerprinting: Identificación de tecnologías, CMS, frameworks y CDN.
-        - **Subdominios: Enumeración de subdominios expuestos incluyendo entornos dev/staging.
+        - **SSL/TLS Profundo:** Análisis de cipher suites, protocolos obsoletos (TLS 1.0/1.1) y firma SHA-1.
+        - **Ficheros Críticos:** Detección de archivos sensibles expuestos (.env, .git, backups, configs).
+        - **OSINT Emails:** Búsqueda de emails corporativos expuestos públicamente.
+        - **Fingerprinting:** Identificación de tecnologías, CMS, frameworks y CDN.
+        - **Subdominios:** Enumeración de subdominios expuestos incluyendo entornos dev/staging.
         
         **Ventajas de la cuenta Pro:**
         - 🎯 **Objetivos:** Hasta 25 dominios o IPs al mes.
@@ -2651,9 +2651,15 @@ with menu_escaneos:
         st.markdown("<h4 style='color: #FF4B4B;'>Enterprise (219€ / mes)</h4>", unsafe_allow_html=True)
         st.error("""
         **Simulación de ataque (Red Team automatizado):**
-        - **Inyecciones:** Pruebas enviando payloads (SQLi, XSS, SSRF).
-        - **Bypass de WAF:** Técnicas para saltarse tu Cortafuegos web.
-        - **Escaneo Autenticado:** Auditoría profunda con usuario/contraseña.
+        - **Inyecciones reales:** Pruebas activas de SQLi y XSS con múltiples payloads verificados, confirmando que el servidor no los sanitiza
+        - **Detección de WAF:** Identificación del proveedor de firewall (Cloudflare, Akamai, Sucuri, Imperva)
+        - **APIs expuestas:** Verificación de endpoints con análisis de CORS y datos sin autenticación
+        - **Subdomain Takeover:** Enumeración y análisis de subdominios expuestos contra servicios vulnerables conocidos (GitHub Pages, Heroku, AWS, Netlify, Vercel y más)
+        - **Fugas en código:** Análisis de HTML y JavaScript externo buscando tokens, API keys, credenciales y rutas internas
+        - **Cookies y sesiones:** Verificación de flags Secure, HttpOnly y SameSite
+        - **Rate Limiting:** Prueba real de protección contra fuerza bruta en endpoints de login
+        - **Métodos HTTP peligrosos:** Detección de PUT, DELETE y TRACE habilitados
+        - **Cabeceras avanzadas:** Análisis profundo de COEP, COOP, CORP y Content Security Policy, detectando configuraciones débiles o ausentes
         
         **Ventajas de la cuenta Enterprise:**
         - 🎯 **Objetivos:** Dominios e IPs ilimitados.
