@@ -824,7 +824,16 @@ def _motor_enterprise_owasp(dominio_limpio):
         if waf_detectado:
             resultados.append(f"✅ **WAF Detectado ({waf_nombre}):** Firewall activo protegiendo la aplicacion contra ataques automatizados.")
         else:
-            resultados.append("🚨 **WAF Ausente:** No se detecto firewall de aplicaciones web. La web es vulnerable a ataques automatizados de SQLi, XSS y fuerza bruta sin ningun filtro.")
+            tiene_indicio = (
+                headers_resp.get("via", "") or
+                headers_resp.get("alt-svc", "") or
+                headers_resp.get("x-cache", "") or
+                headers_resp.get("x-served-by", "")
+            )
+            if tiene_indicio:
+                resultados.append("⚠️ **WAF No Detectado:** No se pudo confirmar la presencia de un firewall conocido, aunque se detectaron indicios de CDN o proxy. Verificar manualmente.")
+            else:
+                resultados.append("🚨 **WAF Ausente:** No se detecto ningun firewall ni CDN. La web esta expuesta a ataques automatizados sin proteccion.")
  
     except Exception:
         resultados.append("⚠️ **WAF:** No se pudo verificar la presencia de firewall de aplicaciones web.")
