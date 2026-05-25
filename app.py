@@ -1470,7 +1470,7 @@ def crear_pdf(dominio, resultados):
 
     if not acciones_alta:
         acciones_alta.append("No se han detectado vulnerabilidades criticas que requieran accion inmediata.")
-    if not acciones_media
+    if not acciones_media: 
         acciones_media.append("No se han detectado vulnerabilidades medias que requieran accion a corto plazo.")
 
     pdf.set_font("Helvetica", "B", 12)
