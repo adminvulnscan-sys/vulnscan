@@ -5,6 +5,7 @@ from supabase import create_client
 from dotenv import load_dotenv
 import requests
 from motores import _motor_basic_pasivo, _motor_pro_activo, _motor_enterprise_owasp
+from app import _clasificar_hallazgos_pdf, _preparar_resultados_pdf
 
 load_dotenv()
 
@@ -49,12 +50,24 @@ def enviar_webhook(webhook_url, dominio, resultados, tipo_escaneo):
 
 def guardar_escaneo_supabase(email, dominio, tipo, resultados):
     try:
+        fallos_r, _, _ = _clasificar_hallazgos_pdf(_preparar_resultados_pdf(resultados))
+        crit_r = sum(1 for r in fallos_r if any(t in r for t in ('[CRITICO]', '[ALERTA]', '[ALTO]')))
+        med_r = sum(1 for r in fallos_r if '[MEDIO]' in r)
+        puntos_r = (crit_r * 15) + (med_r * 7)
+        nota_r = max(5, min(100, 100 - puntos_r))
+        if nota_r >= 80:
+            nivel_riesgo_real = "Optimo (Bajo Riesgo)"
+        elif nota_r >= 50:
+            nivel_riesgo_real = "Moderado"
+        else:
+            nivel_riesgo_real = "CRITICO (Alto Riesgo)"
+
         supabase.table("escaneos").insert({
             "email_cliente": email,
             "dominio": dominio,
             "tipo": tipo,
             "fecha": datetime.now().strftime("%d/%m/%Y"),
-            "riesgo": "Medio",
+            "riesgo": nivel_riesgo_real,
             "resultados_json": json.dumps(resultados)
         }).execute()
         print(f"[Supabase] Escaneo guardado para {email} - {dominio}")

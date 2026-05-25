@@ -2077,12 +2077,24 @@ with menu_dashboard:
                                 registrar_dominio_cliente(email_u, dom)
                                 registrar_objetivo_mes_si_nuevo(email_u, dom)
 
+                                fallos_riesgo, _, _ = _clasificar_hallazgos_pdf(_preparar_resultados_pdf(resultados_auditoria))
+                                crit_r = sum(1 for r in fallos_riesgo if any(t in r for t in ('[CRITICO]', '[ALERTA]', '[ALTO]')))
+                                med_r = sum(1 for r in fallos_riesgo if '[MEDIO]' in r)
+                                puntos_r = (crit_r * 15) + (med_r * 7)
+                                nota_r = max(5, min(100, 100 - puntos_r))
+                                if nota_r >= 80:
+                                    nivel_riesgo_real = "Optimo (Bajo Riesgo)"
+                                elif nota_r >= 50:
+                                    nivel_riesgo_real = "Moderado"
+                                else:
+                                    nivel_riesgo_real = "CRITICO (Alto Riesgo)"
+
                                 nuevo_escaneo = {
                                     "email_cliente": email_u,
                                     "dominio": dom,
                                     "tipo": nivel,
                                     "fecha": datetime.now().strftime("%d/%m/%Y"),
-                                    "riesgo": "Medio",
+                                    "riesgo": nivel_riesgo_real,
                                     "resultados_json": json.dumps(resultados_auditoria)
                                 }
                                 st.session_state['historial_escaneos'].append(nuevo_escaneo)
@@ -2822,7 +2834,7 @@ with menu_reportes:
     with col_f2:
         f_fecha = st.text_input("Fecha del Escaneo", placeholder="Ej: Mayo 2026 o 05/2026", label_visibility="collapsed")
     with col_f3:
-        f_riesgo = st.selectbox("Nivel de Riesgo", ["Todos", "Crítico", "Medio", "Bajo", "Seguro"], label_visibility="collapsed")
+        f_riesgo = st.selectbox("Nivel de Riesgo", ["Todos", "Crítico", "Moderado", "Óptimo"], label_visibility="collapsed")
 
     st.markdown("---")
 
