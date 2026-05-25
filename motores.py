@@ -783,6 +783,22 @@ def _motor_enterprise_owasp(dominio_limpio):
         elif "server" in headers_resp and "mod_security" in headers_resp.get("server", "").lower():
             waf_detectado = True
             waf_nombre = "ModSecurity"
+        elif "cloudflare" in headers_resp.get("via", "").lower():
+            waf_detectado = True
+            waf_nombre = "Cloudflare"
+        elif headers_resp.get("via", ""):
+            waf_detectado = True
+            via_value = headers_resp.get("via", "")
+            if "google" in via_value.lower():
+                waf_nombre = "Google CDN/Proxy"
+            elif "cloudflare" in via_value.lower():
+                waf_nombre = "Cloudflare"
+            else:
+                waf_nombre = f"CDN/Proxy ({via_value})"
+        elif "h3" in headers_resp.get("alt-svc", "").lower():
+            waf_detectado = True
+            waf_nombre = "CDN con HTTP/3"
+
         # Deteccion por cookies de Cloudflare
         if not waf_detectado:
             cookies_str = str(r.cookies.get_dict())
