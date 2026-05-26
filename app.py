@@ -1119,6 +1119,7 @@ def _es_hallazgo_riesgo(linea):
         'cookie insegura', 'api expuesta', 'apis expuestas', 'endpoint expuesto',
         'sqli', 'xss', 'rate limiting ausente', 'sin proteccion activa',
         'debil', 'vulnerable', 'accesible publicamente', 'puerto 21', 'ftp abierto',
+        'waf no detectado', 'waf ausente',
     )
     if any(m in rl for m in marcadores):
         return True
