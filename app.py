@@ -1158,7 +1158,7 @@ def _clasificar_hallazgos_pdf(lineas):
     return fallos, aciertos, resto
 
 
-def crear_pdf(dominio, resultados):
+def crear_pdf(dominio, resultados, nivel="Rápido (Passive)"):
     resultados = _preparar_resultados_pdf(resultados)
     fallos, aciertos, resto = _clasificar_hallazgos_pdf(resultados)
 
@@ -1231,11 +1231,20 @@ def crear_pdf(dominio, resultados):
     pdf.line(10, pdf.get_y(), 200, pdf.get_y())
     pdf.ln(5)
     
+    if nivel == "Auditoría Completa (OWASP)":
+        desc_nivel = "auditoria completa OWASP"
+        desc_metodologia = "activa e intrusiva (OWASP), incluyendo pruebas de penetracion controladas sobre el dominio analizado"
+    elif nivel == "Profundo (Active)":
+        desc_nivel = "escaneo profundo activo"
+        desc_metodologia = "activa (profundo), incluyendo mapeo de puertos, deteccion de CVE y analisis intrusivo controlado"
+    else:
+        desc_nivel = "auditoria de seguridad externa (OSINT)"
+        desc_metodologia = "pasiva y de caja negra (OSINT), basado en informacion publica expuesta por los servidores del dominio analizado"
     pdf.set_font("Helvetica", "", 11)
-    texto_resumen = (f"El presente documento detalla los resultados de la auditoria de seguridad externa (OSINT) "
-                     f"realizada sobre la infraestructura del dominio {dominio}. El proposito de este informe es "
-                     f"proporcionar a la direccion y a los equipos tecnicos una vision clara del nivel de exposicion "
-                     f"actual y los riesgos asociados a su superficie de ataque digital.")
+    texto_resumen = (f"El presente documento detalla los resultados de la {desc_nivel} "
+                 f"realizada sobre la infraestructura del dominio {dominio}. El proposito de este informe es "
+                 f"proporcionar a la direccion y a los equipos tecnicos una vision clara del nivel de exposicion "
+                 f"actual y los riesgos asociados a su superficie de ataque digital.")
     pdf.multi_cell(0, 6, texto_resumen)
     pdf.ln(10)
     
@@ -1498,9 +1507,7 @@ def crear_pdf(dominio, resultados):
     pdf.set_text_color(100, 100, 100)
     legal_text = (
         "Este reporte ha sido generado de forma automatizada por el motor de inteligencia de amenazas VulnScan. "
-        "El analisis realizado es de naturaleza pasiva y de caja negra (OSINT), basado en informacion publica expuesta "
-        "por los servidores del dominio analizado. En ningun momento se han realizado ataques intrusivos, inyecciones de codigo "
-        "ni accesos no autorizados a sistemas privados.\n\n"
+        f"El analisis realizado es de naturaleza {desc_metodologia}. \n\n"
         "El receptor de este documento asume toda la responsabilidad sobre el uso de esta informacion. VulnScan y sus operadores "
         "no se hacen responsables de las decisiones tecnicas o de negocio tomadas a partir de este reporte."
     )
@@ -2196,7 +2203,7 @@ with menu_dashboard:
 
         else:
             st.success("Reporte generado correctamente. Ya puedes descargarlo.")
-            pdf_generado = crear_pdf(dominio_escaneado, resultados)
+            pdf_generado = crear_pdf(dom, resultados, nivel=nivel)
             email_pago = st.session_state.get("email_usuario", "")
 
             if not st.session_state.get("token_pdf_descontado"):
@@ -2837,7 +2844,7 @@ with menu_reportes:
     with col_f2:
         f_fecha = st.text_input("Fecha del Escaneo", placeholder="Ej: Mayo 2026 o 05/2026", label_visibility="collapsed")
     with col_f3:
-        f_riesgo = st.selectbox("Nivel de Riesgo", ["Todos", "Crítico", "Moderado", "Óptimo"], label_visibility="collapsed")
+        f_riesgo = st.selectbox("Nivel de Riesgo", ["Todos", "Critico", "Moderado", "Optimo"], label_visibility="collapsed")
 
     st.markdown("---")
 
