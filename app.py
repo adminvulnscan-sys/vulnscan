@@ -1980,8 +1980,9 @@ with menu_dashboard:
                     "Enterprise": ["Rápido (Passive)", "Profundo (Active)", "Auditoría Completa (OWASP)"],
                 }
                 permitidos = niveles_por_plan.get(plan, ["Rápido (Passive)"])
-                if nivel not in permitidos:
-                    st.error(f"Tu plan **{plan}** no incluye el nivel **{nivel}**. Ajusta el nivel en la barra lateral.")
+                tokens_cubren = (nivel == "Profundo (Active)" and st.session_state['tokens_pro'] > 0) or (nivel == "Auditoría Completa (OWASP)" and st.session_state['tokens_ent'] > 0)
+                if nivel not in permitidos and not tokens_cubren:
+                    st.error(f"Tu plan **{plan}** no incluye el nivel **{nivel}**. Puedes comprar un escaneo suelto o aumentar a un plan superior")
                 else:
                     ok_cuota, msg_cuota = puede_escanear_nuevo_objetivo(email_u, dom, plan)
                     if not ok_cuota:
@@ -2036,6 +2037,7 @@ with menu_dashboard:
                         if tiene_acceso:
                             if token_a_gastar:
                                 st.session_state[token_a_gastar] -= 1
+                                actualizar_usuario_supabase(email_u, token_a_gastar, st.session_state[token_a_gastar])
                                 st.toast(f"🪙 Has gastado 1 escaneo suelto. Te quedan {st.session_state[token_a_gastar]} en la recámara.")
                                 time.sleep(1)
 
