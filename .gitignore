@@ -1,3 +1,21 @@
 .env
 __pycache__/
 *.pyc
+.local-backups/
+
+# Local credentials, data and generated environments stay out of backup commits.
+.env.*
+**/secrets.toml
+*.pem
+*.key
+*.p12
+*.pfx
+.venv/
+venv/
+env/
+node_modules/
+Microsoft/
+supabase/.temp/
+datos_clientes.json
+historial_dominios.json
+/q

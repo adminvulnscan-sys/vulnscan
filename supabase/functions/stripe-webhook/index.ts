@@ -1,86 +1,39 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
-
-const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const stripeWebhookSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET")!;
-
-async function verifyStripeSignature(body: string, signature: string, secret: string): Promise<boolean> {
-  try {
-    const parts = signature.split(",").reduce((acc: Record<string, string>, part) => {
-      const [key, value] = part.split("=");
-      acc[key] = value;
-      return acc;
-    }, {});
-
-    const timestamp = parts["t"];
-    const sig = parts["v1"];
-    const payload = `${timestamp}.${body}`;
-
-    const key = await crypto.subtle.importKey(
-      "raw",
-      new TextEncoder().encode(secret),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["sign"]
-    );
-
-    const signatureBytes = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
-    const expectedSig = Array.from(new Uint8Array(signatureBytes)).map(b => b.toString(16).padStart(2, "0")).join("");
-
-    return expectedSig === sig;
-  } catch {
-    return false;
-  }
-}
+import catalogDefaults from "../_shared/billing_catalog.json" with { type: "json" };
+import { processEvent, verifySignature, stripeReader } from "./core.mjs";
 
 Deno.serve(async (req) => {
+  if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
+  const secret = Deno.env.get("STRIPE_WEBHOOK_SECRET");
+  const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
+  const url = Deno.env.get("SUPABASE_URL");
+  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!secret || !stripeKey || !url || !key) return new Response("Not configured", { status: 503 });
   const body = await req.text();
-  const signature = req.headers.get("stripe-signature") || "";
-
-  const isValid = await verifyStripeSignature(body, signature, stripeWebhookSecret);
-  if (!isValid) {
+  if (!await verifySignature(body, req.headers.get("stripe-signature"), secret))
     return new Response("Invalid signature", { status: 400 });
+  let event;
+  try { event = JSON.parse(body); } catch { return new Response("Invalid JSON", { status: 400 }); }
+  const db = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+  async function rpc(name: string, args: Record<string, unknown>) {
+    const { data, error } = await db.rpc(name, args);
+    if (error) throw new Error("Billing database operation failed");
+    return data;
   }
-
-  const event = JSON.parse(body);
-  const supabase = createClient(supabaseUrl, supabaseKey);
-
-  if (event.type === "checkout.session.completed") {
-    const session = event.data.object;
-    const email = session.customer_email
-      || session.metadata?.email
-      || session.customer_details?.email;
-    const tipo = session.metadata?.tipo;
-
-    if (!email) return new Response("No email", { status: 400 });
-
-    if (tipo === "pro_recurrente") {
-      await supabase.from("usuarios").upsert({ email, plan_activo: "Pro" });
-    } else if (tipo === "enterprise_recurrente") {
-      await supabase.from("usuarios").upsert({ email, plan_activo: "Enterprise" });
-    } else if (tipo === "pro_unico") {
-      const { data } = await supabase.from("usuarios").select("tokens_pro").eq("email", email).single();
-      const tokens = (data?.tokens_pro || 0) + 1;
-      await supabase.from("usuarios").upsert({ email, tokens_pro: tokens });
-    } else if (tipo === "enterprise_unico") {
-      const { data } = await supabase.from("usuarios").select("tokens_ent").eq("email", email).single();
-      const tokens = (data?.tokens_ent || 0) + 1;
-      await supabase.from("usuarios").upsert({ email, tokens_ent: tokens });
-    } else if (tipo === "pdf_unico") {
-      const { data } = await supabase.from("usuarios").select("tokens_pdf").eq("email", email).single();
-      const tokens = (data?.tokens_pdf || 0) + 1;
-      await supabase.from("usuarios").upsert({ email, tokens_pdf: tokens });
-    }
+  const catalog = Object.fromEntries(Object.entries(catalogDefaults).map(([type, entry]) =>
+    [type, { ...entry, price: Deno.env.get(`STRIPE_PRICE_${type.toUpperCase()}`) || entry.price }]));
+  try {
+    const result = await processEvent(event, {
+      catalog, liveMode: Deno.env.get("STRIPE_LIVEMODE") === "true",
+      stripe: stripeReader(stripeKey),
+      store: {
+        claim: (user: string, eventId: string) => rpc("billing_claim", { p_user: user, p_event: eventId }),
+        release: (user: string, token: string) => rpc("billing_release", { p_user: user, p_token: token }),
+        apply: (update: Record<string, unknown>) => rpc("billing_apply", { p_update: update }),
+      },
+    });
+    return Response.json(result);
+  } catch {
+    return new Response("Billing processing failed; retry or reconcile", { status: 500 });
   }
-
-  if (event.type === "customer.subscription.deleted") {
-    const email = event.data.object.metadata?.email;
-    if (email) {
-      await supabase.from("usuarios").update({ plan_activo: "Basic" }).eq("email", email);
-    }
-  }
-
-  return new Response(JSON.stringify({ received: true }), {
-    headers: { "Content-Type": "application/json" },
-  });
 });

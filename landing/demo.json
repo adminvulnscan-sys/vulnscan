@@ -1,0 +1,7 @@
+{
+ "domain":"example.invalid",
+ "critical_count":0,
+ "medium_count":4,
+ "finding_scale_max":10,
+ "source":"Local demonstration; dashboard formula: clamp(100 - 15*critical - 7*medium, 5, 100)"
+}

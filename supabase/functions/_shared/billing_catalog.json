@@ -1,0 +1,7 @@
+{
+  "pro_recurrente": {"price": "price_1TVW8kAZ3L9CUgKeJE1yNZuY", "mode": "subscription", "plan": "Pro"},
+  "enterprise_recurrente": {"price": "price_1TVW97AZ3L9CUgKe7ezI3HEc", "mode": "subscription", "plan": "Enterprise"},
+  "pro_unico": {"price": "price_1TVWD1AZ3L9CUgKeNcQJnj2s", "mode": "payment", "credit": "tokens_pro"},
+  "enterprise_unico": {"price": "price_1TVWE4AZ3L9CUgKeuiadcJAb", "mode": "payment", "credit": "tokens_ent"},
+  "pdf_unico": {"price": "price_1TVWFkAZ3L9CUgKe5brIDxDO", "mode": "payment", "credit": "tokens_pdf"}
+}
