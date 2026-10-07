@@ -84,6 +84,32 @@ def generar_link_pago(price_id, email_usuario, tipo_compra, modo):
 
 
 
+def _billing_failure(error, operation):
+    """Log only allowlisted diagnostic metadata, never exception payloads."""
+    import logging
+    code = getattr(error, "code", None)
+    if code is None and error.args and isinstance(error.args[0], dict):
+        code = error.args[0].get("code")
+    code = str(code or "unknown")
+    if not re.fullmatch(r"[A-Za-z0-9_]{1,24}", code):
+        code = "unknown"
+    logging.getLogger("vulnscan.billing").warning(
+        "operation=%s error_type=%s code=%s; checkout requires usuarios.stripe_customer_id and stripe_subscription_id; review migrations 001/002",
+        operation, type(error).__name__, code,
+    )
+    st.error(_vs_translate("No se puede abrir el pago ahora. La configuración de facturación necesita revisión; no se ha confirmado ninguna compra."))
+
+
+def _purchase_button(price_id, email, kind, mode, label, key, **options):
+    # Rendering, tabs and language changes never create a Checkout session.
+    if st.button(label, key=key, **options):
+        try:
+            url = generar_link_pago(price_id, email, kind, mode)
+            st.link_button(_vs_translate("Continuar al pago seguro"), url=url, **options)
+        except Exception as error:
+            _billing_failure(error, "checkout")
+
+
 # --- INICIALIZACIÓN DE MEMORIA (Paso 1) ---
 if 'historial_escaneos' not in st.session_state:
     st.session_state['historial_escaneos'] = []
@@ -454,6 +480,28 @@ _VS_TRANSLATIONS = {
     "register_form": "register_form",
 }
 
+_VS_TRANSLATIONS.update({
+    "Continuar al pago seguro": "Continue to secure payment",
+    "No se puede abrir el pago ahora. La configuración de facturación necesita revisión; no se ha confirmado ninguna compra.": "Payment cannot be opened right now. Billing configuration needs review; no purchase has been confirmed.",
+    "Créditos activos": "Active scan credits",
+    "Créditos OWASP": "OWASP credits",
+    "Créditos PDF": "PDF credits",
+    "No disponible": "Unavailable",
+})
+
+def _credit_indicator_value(field):
+    data = st.session_state.get("_credit_row") or {}
+    if not st.session_state.get("usuario_autenticado") or data.get("email") != st.session_state.get("email_usuario"):
+        return _vs_translate("No disponible")
+    value = data.get(field)
+    if isinstance(value, bool) or value is None:
+        return _vs_translate("No disponible")
+    if isinstance(value, int) and value >= 0:
+        return value
+    if isinstance(value, str) and value.isascii() and value.isdecimal():
+        return int(value)
+    return _vs_translate("No disponible")
+
 def _vs_translate(value):
     """Translate visible UI text while preserving dynamic values/HTML."""
     if st.session_state.get("_vs_lang", "es") != "en":
@@ -502,67 +550,21 @@ def _vs_set_language(lang):
 
 _vs_current_lang = st.session_state.get("_vs_lang", "es")
 
-# Contenedor fijo: los botones son controles Streamlit, por lo que NO abren pestañas nuevas.
-st.markdown(
-    """
-    <style>
-        /* Agrupa ES + EN y fija el conjunto arriba a la derecha. */
-        div[data-testid="stHorizontalBlock"]:has(button[aria-label="ES"]) {
-            position: fixed !important;
-            top: 12px !important;
-            right: 18px !important;
-            width: 112px !important;
-            z-index: 999999 !important;
-            gap: 4px !important;
-            background: rgba(255,255,255,.92);
-            padding: 3px !important;
-            border-radius: 999px !important;
-        }
-        div[data-testid="stHorizontalBlock"]:has(button[aria-label="ES"]) div[data-testid="column"] {
-            width: 50% !important;
-            flex: 1 1 50% !important;
-            min-width: 0 !important;
-        }
-        div[data-testid="stHorizontalBlock"]:has(button[aria-label="ES"]) button {
-            width: 100% !important;
-            min-height: 34px !important;
-            padding: 4px 8px !important;
-            border-radius: 999px !important;
-            font-weight: 700 !important;
-        }
-        @media (max-width: 640px) {
-            div[data-testid="stHorizontalBlock"]:has(button[aria-label="ES"]) {
-                top: 8px !important;
-                right: 8px !important;
-                width: 104px !important;
-            }
-        }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-_vs_c1, _vs_c2 = st.columns([1, 1])
-with _vs_c1:
-    _vs_es_clicked = st.button(
-        "ES",
-        key="_vs_language_es",
-        help="Cambiar a español",
-        on_click=_vs_set_language,
-        args=("es",),
-    )
-with _vs_c2:
-    _vs_en_clicked = st.button(
-        "EN",
-        key="_vs_language_en",
-        help="Switch to English",
-        on_click=_vs_set_language,
-        args=("en",),
-    )
-
-# Nota: el CSS identifica estos botones por sus keys mediante selectores de aria-label
-# en versiones modernas de Streamlit. Si una versión no expone ese atributo, el cambio
-# de idioma sigue funcionando; solo puede variar el posicionamiento visual.
+# The private picker uses the same SVG flags/details controls as the landing,
+# inside a supported Streamlit component. No access to the parent document.
+import streamlit.components.v1 as _panel_components
+st.markdown("""<style>
+.st-key-panel_language {position:fixed!important;right:18px;top:78px;width:180px!important;z-index:999999;}
+.st-key-panel_language iframe {background:transparent;}
+@media(max-width:640px){.st-key-panel_language{right:8px;top:60px;}}
+</style>""", unsafe_allow_html=True)
+from panel_language_picker import language_picker
+_panel_selection = language_picker(st.session_state.get("_vs_lang", "es"))
+if isinstance(_panel_selection, dict) and _panel_selection.get("language") in ("es", "en"):
+    if _panel_selection.get("event") != st.session_state.get("_panel_language_event"):
+        st.session_state["_panel_language_event"] = _panel_selection.get("event")
+        _vs_set_language(_panel_selection["language"])
+        st.rerun()
 _vs_current_lang = st.session_state.get("_vs_lang", "es")
 
 # Traducimos únicamente métodos de presentación/entrada de texto.
@@ -962,6 +964,9 @@ def _provision_usuario_supabase(email):
 
 
 def _aplicar_fila_usuario_a_sesion(datos):
+    # Display-only snapshot, bound to the authenticated profile; no balances changed.
+    if st.session_state.get("usuario_autenticado") and datos.get("email") == st.session_state.get("email_usuario"):
+        st.session_state["_credit_row"] = {k: datos.get(k) for k in ("email", "tokens_pro", "tokens_ent", "tokens_pdf")}
     if "plan_activo" in datos and datos["plan_activo"] not in (None, ""):
         st.session_state["plan_activo"] = datos["plan_activo"]
     else:
@@ -1009,6 +1014,8 @@ def _aplicar_fila_usuario_a_sesion(datos):
         print(f"[DEBUG dominios_verificados] Error: {Exception}")
 
 def cargar_perfil_usuario(email):
+    # Never show an old snapshot if the current account cannot be loaded.
+    st.session_state.pop("_credit_row", None)
     if not email:
         return
     try:
@@ -2035,11 +2042,10 @@ with st.sidebar:
 
 # --- CABECERA ---
 carpeta_actual = os.path.dirname(os.path.abspath(__file__))
-archivos_logo = [f for f in os.listdir(carpeta_actual) if f.lower().startswith("logo.")]
+ruta_final = os.path.join(carpeta_actual, "assets", "vulnscan-logo-clean.png")
 
 logo_b64 = None
-if archivos_logo:
-    ruta_final = os.path.join(carpeta_actual, archivos_logo[0])
+if os.path.isfile(ruta_final):
     with open(ruta_final, "rb") as f:
         logo_b64 = base64.b64encode(f.read()).decode()
 
@@ -2161,6 +2167,14 @@ with menu_dashboard:
         st.session_state['tokens_pro'] = 0
     if 'tokens_ent' not in st.session_state:
         st.session_state['tokens_ent'] = 0
+
+    credit_columns = st.columns(3)
+    for credit_column, credit_label, credit_field in zip(
+        credit_columns,
+        ("Créditos activos", "Créditos OWASP", "Créditos PDF"),
+        ("tokens_pro", "tokens_ent", "tokens_pdf"),
+    ):
+        credit_column.metric(_vs_translate(credit_label), _credit_indicator_value(credit_field))
 
     st.markdown("""
     <style>
@@ -2473,24 +2487,12 @@ with menu_dashboard:
             usuario_logueado = bool(st.session_state.get("usuario_autenticado")) and bool(email_pago)
             with col_v1:
                 if usuario_logueado:
-                    try:
-                        url_pdf = generar_link_pago(
-                            STRIPE_PRICES["pdf_unico"], email_pago, "pdf_unico", "payment"
-                        )
-                        st.link_button(" Descargar Reporte Completo (9,99€)", url=url_pdf, use_container_width=True)
-                    except Exception as e:
-                        st.error(f"No se pudo generar el pago de PDF: {e}")
+                    _purchase_button(STRIPE_PRICES['pdf_unico'], email_pago, 'pdf_unico', 'payment', ' Descargar Reporte Completo (9,99€)', 'purchase_2493', use_container_width=True)
                 else:
                     st.info("Inicia sesión para habilitar el pago.")
             with col_v2:
                 if usuario_logueado:
-                    try:
-                        url_pro = generar_link_pago(
-                            STRIPE_PRICES["pro_recurrente"], email_pago, "pro_recurrente", "subscription"
-                        )
-                        st.link_button(" Mejorar a Plan Pro", url=url_pro, type="primary", use_container_width=True)
-                    except Exception as e:
-                        st.error(f"No se pudo generar el pago del plan Pro: {e}")
+                    _purchase_button(STRIPE_PRICES['pro_recurrente'], email_pago, 'pro_recurrente', 'subscription', ' Mejorar a Plan Pro', 'purchase_2504', type='primary', use_container_width=True)
                 else:
                     st.info("Inicia sesión para habilitar el pago.")
             st.info("💡 Serás redirigido a la pasarela segura. Una vez completado el pago, tu cuenta se actualizará automáticamente.")
@@ -2921,26 +2923,14 @@ with menu_escaneos:
 # 1. Botón de Suscripción Principal (o prueba gratuita)
             st.caption("Las pruebas gratuitas requieren configuracion en Stripe; puedes contratar el plan con el pago seguro.")
             if usuario_logueado:
-                try:
-                    url_pro_sub = generar_link_pago(
-                        STRIPE_PRICES["pro_recurrente"], email_pago, "pro_recurrente", "subscription"
-                    )
-                    st.link_button(" Suscribirse (65€/mes)", url=url_pro_sub, type="primary", use_container_width=True)
-                except Exception as e:
-                    st.error(f"No se pudo generar el pago Pro: {e}")
+                _purchase_button(STRIPE_PRICES['pro_recurrente'], email_pago, 'pro_recurrente', 'subscription', ' Suscribirse (65€/mes)', 'purchase_2941', type='primary', use_container_width=True)
             else:
                 st.info("Inicia sesión para habilitar el pago.")
             
             # 2. Botón de Venta Única (Downselling)
             st.markdown("<p style='text-align: center; color: #888; font-size: 0.8rem; margin: 5px 0;'>— O PAGO POR USO —</p>", unsafe_allow_html=True)
             if usuario_logueado:
-                try:
-                    url_pro_unico = generar_link_pago(
-                        STRIPE_PRICES["pro_unico"], email_pago, "pro_unico", "payment"
-                    )
-                    st.link_button(" Comprar Escaneo Único (39€)", url=url_pro_unico, use_container_width=True)
-                except Exception as e:
-                    st.error(f"No se pudo generar el pago por escaneo Pro: {e}")
+                _purchase_button(STRIPE_PRICES['pro_unico'], email_pago, 'pro_unico', 'payment', ' Comprar Escaneo Único (39€)', 'purchase_2954', use_container_width=True)
             else:
                 st.info("Inicia sesión para habilitar el pago.")
 
@@ -2976,26 +2966,14 @@ with menu_escaneos:
             usuario_logueado = bool(st.session_state.get("usuario_autenticado")) and bool(email_pago)
             # 1. Botón de Suscripción Principal
             if usuario_logueado:
-                try:
-                    url_ent_sub = generar_link_pago(
-                        STRIPE_PRICES["enterprise_recurrente"], email_pago, "enterprise_recurrente", "subscription"
-                    )
-                    st.link_button(" Suscribirse (219€/mes)", url=url_ent_sub, type="primary", use_container_width=True)
-                except Exception as e:
-                    st.error(f"No se pudo generar el pago Enterprise: {e}")
+                _purchase_button(STRIPE_PRICES['enterprise_recurrente'], email_pago, 'enterprise_recurrente', 'subscription', ' Suscribirse (219€/mes)', 'purchase_2996', type='primary', use_container_width=True)
             else:
                 st.info("Inicia sesión para habilitar el pago.")
             
             # 2. Botón de Venta Única (Downselling)
             st.markdown("<p style='text-align: center; color: #888; font-size: 0.8rem; margin: 5px 0;'>— O PAGO POR USO —</p>", unsafe_allow_html=True)
             if usuario_logueado:
-                try:
-                    url_ent_unico = generar_link_pago(
-                        STRIPE_PRICES["enterprise_unico"], email_pago, "enterprise_unico", "payment"
-                    )
-                    st.link_button(" Comprar Escaneo Único (139€)", url=url_ent_unico, use_container_width=True)
-                except Exception as e:
-                    st.error(f"No se pudo generar el pago OWASP único: {e}")
+                _purchase_button(STRIPE_PRICES['enterprise_unico'], email_pago, 'enterprise_unico', 'payment', ' Comprar Escaneo Único (139€)', 'purchase_3009', use_container_width=True)
             else:
                 st.info("Inicia sesión para habilitar el pago.")
 
@@ -3199,11 +3177,7 @@ with menu_reportes:
                                 st.session_state[f"mostrar_upsell_{sufijo}_{index}"] = True
                             if st.session_state.get(f"mostrar_upsell_{sufijo}_{index}"):
                                 st.warning("🔒 Para descargar el reporte PDF necesitas el **Plan Pro** o **Enterprise**, también puedes comprarlo por **9,99€**.")
-                                try:
-                                    url_pdf = generar_link_pago(STRIPE_PRICES["pdf_unico"], email_pago, "pdf_unico", "payment")
-                                    st.link_button("🛒 Comprar por 9,99€", url=url_pdf, use_container_width=True)
-                                except Exception as e:
-                                    st.error(f"Error al generar el enlace: {e}")
+                                _purchase_button(STRIPE_PRICES['pdf_unico'], email_pago, 'pdf_unico', 'payment', '🛒 Comprar por 9,99€', 'purchase_3219', use_container_width=True)
                 st.markdown("</div>", unsafe_allow_html=True)
 
         with sub_tab_recientes:
@@ -3461,13 +3435,7 @@ with menu_config:
                 email_pago = st.session_state.get("email_usuario", "")
                 usuario_logueado = bool(st.session_state.get("usuario_autenticado")) and bool(email_pago)
                 if usuario_logueado:
-                    try:
-                        url_pro = generar_link_pago(
-                            STRIPE_PRICES["pro_recurrente"], email_pago, "pro_recurrente", "subscription"
-                        )
-                        st.link_button("⬆ Mejorar a Plan Pro", url=url_pro, type="primary", width='stretch')
-                    except Exception as e:
-                        st.error(f"No se pudo generar pago Pro: {e}")
+                    _purchase_button(STRIPE_PRICES['pro_recurrente'], email_pago, 'pro_recurrente', 'subscription', '⬆ Mejorar a Plan Pro', 'purchase_3481', type='primary', width='stretch')
                 else:
                     st.info("Inicia sesión para habilitar el pago.")
         else:
@@ -3524,13 +3492,7 @@ curl -X POST https://api.vulnscan.com/v1/scans \\
             st.error(f"🔒 **Función Enterprise.** Tu plan actual ({plan_actual}) no admite notificaciones en tiempo real vía Webhook. Requiere licencia Enterprise.")
             email_pago = st.session_state.get("email_usuario", "")
             if email_pago:
-                try:
-                    url_enterprise = generar_link_pago(
-                        STRIPE_PRICES["enterprise_recurrente"], email_pago, "enterprise_recurrente", "subscription"
-                    )
-                    st.link_button(" Mejorar a Plan Enterprise", url=url_enterprise, type="primary", use_container_width=True)
-                except Exception as e:
-                    st.error(f"No se pudo generar el enlace: {e}")
+                _purchase_button(STRIPE_PRICES['enterprise_recurrente'], email_pago, 'enterprise_recurrente', 'subscription', ' Mejorar a Plan Enterprise', 'purchase_3544', type='primary', use_container_width=True)
         else:
             if 'webhook_url' not in st.session_state:
                 st.session_state['webhook_url'] = ""
@@ -3655,31 +3617,23 @@ curl -X POST https://api.vulnscan.com/v1/scans \\
         
         col_b1, col_b2 = st.columns(2)
         with col_b1:
-            try:
-                portal_url = customer_portal(stripe, supabase, st.session_state.get("email_usuario", ""), os.getenv("APP_URL", "http://localhost:8501"))
-                st.link_button("Gestionar tarjetas y facturacion", url=portal_url, width='stretch')
-            except Exception:
-                st.info("El portal estara disponible cuando se vincule tu cliente Stripe.")
+            if st.button("Gestionar tarjetas y facturacion", key="open_billing_portal", width="stretch"):
+                try:
+                    portal_url = customer_portal(stripe, supabase, st.session_state.get("email_usuario", ""), os.getenv("APP_URL", "http://localhost:8501"))
+                    st.link_button(_vs_translate("Continuar al pago seguro"), url=portal_url, width="stretch")
+                except Exception as error:
+                    _billing_failure(error, "portal")
         with col_b2:
             email_pago = st.session_state.get("email_usuario", "")
             usuario_logueado = bool(st.session_state.get("usuario_autenticado")) and bool(email_pago)
             if usuario_logueado:
-                try:
-                    if plan_actual == "Pro":
-                        price_id = STRIPE_PRICES["enterprise_recurrente"]
-                        tipo_compra = "enterprise_recurrente"
-                    else:
-                        price_id = STRIPE_PRICES["pro_recurrente"]
-                        tipo_compra = "pro_recurrente"
-                    url_upgrade = generar_link_pago(price_id, email_pago, tipo_compra, "subscription")
-                    st.link_button(
-                        "⬆ Mejorar a Enterprise" if plan_actual == "Pro" else "⬆ Mejorar a Plan Pro",
-                        url=url_upgrade,
-                        type="primary",
-                        width='stretch',
-                    )
-                except Exception as e:
-                    st.error(f"No se pudo generar el enlace de upgrade: {e}")
+                if plan_actual == 'Pro':
+                    price_id = STRIPE_PRICES['enterprise_recurrente']
+                    tipo_compra = 'enterprise_recurrente'
+                else:
+                    price_id = STRIPE_PRICES['pro_recurrente']
+                    tipo_compra = 'pro_recurrente'
+                _purchase_button(price_id, email_pago, tipo_compra, 'subscription', '⬆ Mejorar a Enterprise' if plan_actual == 'Pro' else '⬆ Mejorar a Plan Pro', 'purchase_3684', type='primary', width='stretch')
             else:
                 st.info("Inicia sesión para habilitar el pago.")
             
