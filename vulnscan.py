@@ -28,7 +28,7 @@ import time
 import streamlit as st
 
 from supabase import create_client, Client
-from billing import (session_client, authenticated_user, refresh_payment_return,
+from billing import (effective_plan, session_client, authenticated_user, refresh_payment_return,
                      change_subscription, clear_account_state, price_catalog,
                      require_public_key, spend_credit, customer_portal,
                      begin_scan, finish_scan, ScanBusy, pending_scan_credit)
@@ -974,9 +974,7 @@ def _aplicar_fila_usuario_a_sesion(datos):
 
     st.session_state["billing_period_end"] = datos.get("billing_period_end")
     st.session_state["billing_status"] = datos.get("billing_status")
-    if st.session_state.get("plan_activo") in ("Pro", "Enterprise"):
-        if datos.get("billing_status") != "active" or not datos.get("billing_period_end") or int(datos["billing_period_end"]) <= time.time():
-            st.session_state["plan_activo"] = "Basic"
+    st.session_state["plan_activo"] = effective_plan(supabase, datos)
     st.session_state["fecha_vencimiento"] = datos.get("fecha_vencimiento", "Sin caducidad")
     st.session_state["api_key_configurada"] = bool(datos.get("api_key_real"))
     st.session_state["webhook_url"] = datos.get("webhook_url", "")

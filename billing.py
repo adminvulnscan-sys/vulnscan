@@ -4,6 +4,33 @@ import json
 import os
 from pathlib import Path
 from uuid import uuid4
+import logging
+import time
+
+
+def effective_plan(client, profile, now=None):
+    """Resolve access without changing stored plan, credits or Stripe state."""
+    now = time.time() if now is None else now
+    plan = "Basic"
+    try:
+        if (profile.get("plan_activo") in ("Pro", "Enterprise")
+                and profile.get("billing_status") == "active"
+                and int(profile.get("billing_period_end") or 0) > now):
+            plan = profile["plan_activo"]
+    except (TypeError, ValueError):
+        pass
+    try:
+        authenticated_user(client, profile.get("email"))
+        grant = client.rpc("billing_internal_access", {}).execute().data
+        if (isinstance(grant, dict) and grant.get("plan") == "Enterprise"
+                and grant.get("source") == "internal_test"
+                and "expires_at" in grant
+                and (grant["expires_at"] is None or float(grant["expires_at"]) > now)):
+            return "Enterprise"
+    except Exception as exc:
+        # No exception payload, email, UID, credentials or grant details in logs.
+        logging.getLogger(__name__).warning("Internal access lookup unavailable: %s", type(exc).__name__)
+    return plan
 
 
 def price_catalog():
