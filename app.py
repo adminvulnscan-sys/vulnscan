@@ -2474,7 +2474,8 @@ with menu_dashboard:
         
         plan_actual = st.session_state.get('plan_activo', 'Basic')
         tokens_pdf = int(st.session_state.get("tokens_pdf") or 0)
-        tiene_derecho_pdf = bool(st.session_state.get("pdf_descarga_habilitada"))
+        tiene_derecho_pdf = bool(st.session_state.get("pdf_descarga_habilitada")) or _pdf_desbloqueado_servidor(
+            st.session_state.get("escaneo_actual_id", ""))
         if not tiene_derecho_pdf:
             st.button("🔒 Descargar Reporte en PDF (Pro)", use_container_width=True, disabled=True)
             st.error("🔒 **Función Premium.** Necesitas el Plan Pro para exportar un escaneo Pasivo en formato ejecutivo.")
@@ -2974,6 +2975,17 @@ with menu_escaneos:
                 _purchase_button(STRIPE_PRICES['enterprise_unico'], email_pago, 'enterprise_unico', 'payment', ' Comprar Escaneo Único (139€)', 'purchase_3009', use_container_width=True)
             else:
                 st.info("Inicia sesión para habilitar el pago.")
+
+    # A PDF credit can be purchased before a scan exists; consumption stays in the PDF RPC.
+    if st.session_state.get("plan_activo", "Basic") == "Basic" and st.session_state.get("usuario_autenticado"):
+        pdf_en = st.session_state.get("_vs_lang", "es") == "en"
+        st.markdown("#### PDF report credit" if pdf_en else "#### Crédito para informe PDF")
+        st.caption("Buy 1 PDF credit to unlock a saved report. No scan is included; this purchase does not download a report."
+                   if pdf_en else "Compra 1 crédito PDF para desbloquear un informe guardado. No incluye un escaneo ni descarga un informe.")
+        _purchase_button(STRIPE_PRICES['pdf_unico'], st.session_state.get("email_usuario", ""),
+                         'pdf_unico', 'payment',
+                         "Buy 1 PDF credit (9.99 EUR)" if pdf_en else "Comprar 1 crédito PDF (9,99 EUR)",
+                         'purchase_pdf_credit_standalone', use_container_width=True)
 
     st.markdown("---")
     st.markdown("<br>", unsafe_allow_html=True)

@@ -8,6 +8,25 @@ from billing import begin_scan, finish_scan, pending_scan_credit, ScanBusy
 
 
 class CreditFlowTests(TestCase):
+    def test_dashboard_credit_purchase_and_durable_right_routes(self):
+        for filename in ("app.py", "vulnscan.py"):
+            tree = ast.parse(Path(filename).read_text(encoding="utf-8"))
+            calculate = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
+                             and n.name == "_calcular_derecho_pdf")
+            gate = next(n for n in ast.walk(tree) if isinstance(n, ast.Assign)
+                        and any(isinstance(t, ast.Name) and t.id == "tiene_derecho_pdf" for t in n.targets))
+            for credits, server_right, expected in [(1, False, True), (0, False, False), (0, True, True)]:
+                state = {"plan_activo": "Basic", "tokens_pdf": credits,
+                         "escaneo_actual_id": "42", "reporte_pdf_desbloqueado": "another-report"}
+                server = Mock(return_value=server_right)
+                ns = {"st": SimpleNamespace(session_state=state), "_pdf_desbloqueado_servidor": server}
+                exec(compile(ast.Module(body=[calculate], type_ignores=[]), filename, "exec"), ns)
+                state["pdf_descarga_habilitada"] = ns["_calcular_derecho_pdf"]("Rápido (Passive)")
+                exec(compile(ast.Module(body=[gate], type_ignores=[]), filename, "exec"), ns)
+                self.assertEqual(ns["tiene_derecho_pdf"], expected)
+                if credits == 0:
+                    server.assert_called_once_with("42")
+
     def pdf_function(self, filename, state, response, clicked=False):
         tree = ast.parse(Path(filename).read_text(encoding="utf-8"))
         fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_descargar_pdf_seguro")

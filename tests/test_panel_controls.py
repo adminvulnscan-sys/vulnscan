@@ -20,7 +20,14 @@ class PanelControlsTests(unittest.TestCase):
         before=calls(old,'generar_link_pago')
         after=calls(new,'_purchase_button')
         self.assertEqual(sum(before.values()),10)
-        self.assertEqual(before,after)
+        # Preserve all original routes and add exactly one standalone PDF-credit entry.
+        extras = after - before
+        self.assertEqual(sum(extras.values()), 1)
+        self.assertEqual(before - after, Counter())
+        extra_args = next(iter(extras))
+        self.assertIn("pdf_unico", extra_args[0])
+        self.assertIn("pdf_unico", extra_args[2])
+        self.assertIn("payment", extra_args[3])
 
     def test_render_and_language_do_not_create_checkout(self):
         app=AppTest.from_file(str(PREVIEW),default_timeout=20).run()
@@ -38,6 +45,19 @@ class PanelControlsTests(unittest.TestCase):
         button=next(b for b in app.button if b.label.strip()=='Comprar Escaneo Único (39€)')
         button.click().run()
         self.assertFalse(app.exception)
+        self.assertEqual(app.session_state['preview_checkouts'],1)
+
+    def test_standalone_pdf_credit_without_scan_is_explicit_purchase(self):
+        app=AppTest.from_file(str(PREVIEW),default_timeout=20).run()
+        app.checkbox[0].uncheck().run()
+        self.assertFalse(app.exception)
+        button=next(b for b in app.button if b.key=='purchase_pdf_credit_standalone')
+        self.assertNotIn('preview_checkouts',app.session_state)
+        self.assertTrue(any('No incluye un escaneo' in c.value for c in app.caption))
+        button.click().run()
+        self.assertFalse(app.exception)
+        self.assertEqual(app.session_state['preview_checkouts'],1)
+        app.run()
         self.assertEqual(app.session_state['preview_checkouts'],1)
         app.run()
         self.assertEqual(app.session_state['preview_checkouts'],1)
