@@ -146,6 +146,45 @@ class BillingTests(unittest.TestCase):
         self.assertNotIn("email=", args["success_url"])
         self.assertIn("{CHECKOUT_SESSION_ID}", args["success_url"])
 
+    def test_checkout_dynamic_methods_preserve_all_purchase_contracts(self):
+        catalog = {kind: 'price_' + kind for kind in (
+            'pdf_unico', 'pro_unico', 'enterprise_unico',
+            'pro_recurrente', 'enterprise_recurrente')}
+        for filename in ('app.py', 'vulnscan.py'):
+            tree = ast.parse(Path(filename).read_text(encoding='utf-8'))
+            fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
+                      and n.name == 'generar_link_pago')
+            for kind, price in catalog.items():
+                stripe, db = stripe_mock(), client()
+                db.table.return_value.select.return_value.eq.return_value.execute.return_value.data = []
+                def create(**kwargs):
+                    self.assertNotIn('payment_method_types', kwargs)
+                    self.assertNotIn('payment_method_configuration', kwargs)
+                    return SimpleNamespace(url='https://example.invalid/test-checkout')
+                stripe.checkout.Session.create.side_effect = create
+                namespace = {'stripe': stripe, 'supabase': db,
+                    'authenticated_user': __import__('billing').authenticated_user,
+                    'STRIPE_PRICES': catalog,
+                    'os': SimpleNamespace(getenv=lambda key, default: default)}
+                exec(compile(ast.Module(body=[fn], type_ignores=[]), filename, 'exec'), namespace)
+                mode = 'subscription' if kind.endswith('_recurrente') else 'payment'
+                namespace['generar_link_pago'](price, 'a@example.test', kind, mode)
+                args = stripe.checkout.Session.create.call_args.kwargs
+                self.assertEqual(args['line_items'], [{'price': price, 'quantity': 1}])
+                self.assertEqual(args['mode'], mode)
+                self.assertEqual(args['metadata']['user_id'], 'a')
+                self.assertEqual(args['metadata']['tipo'], kind)
+                self.assertEqual(args['customer_email'], 'a@example.test')
+                if mode == 'payment':
+                    self.assertEqual(args['customer_creation'], 'always')
+                else:
+                    self.assertEqual(args['subscription_data']['metadata']['user_id'], 'a')
+                with self.assertRaises(ValueError):
+                    namespace['generar_link_pago'](price, 'a@example.test', kind,
+                                                   'payment' if mode == 'subscription' else 'subscription')
+                stripe.checkout.Session.create.assert_called_once()
+                db.table.return_value.update.assert_not_called()
+
     def test_logout_cleans_only_account_data(self):
         state = {"_vs_lang": "es", "mostrar_terminos": True,
                  "email_usuario": "a@example.test", "tokens_pdf": 3,

@@ -72,7 +72,7 @@ def generar_link_pago(price_id, email_usuario, tipo_compra, modo):
                 return portal.url
         extra["subscription_data"] = {"metadata": {"user_id": str(user.id), "email": user.email}}
     session = stripe.checkout.Session.create(
-        payment_method_types=['card'],
+        # Payment methods are managed in the Stripe Dashboard, not sent here.
         line_items=[{'price': price_id, 'quantity': 1}],
         mode=modo,
         metadata={'email': user.email, 'user_id': str(user.id), 'tipo': tipo_compra},
@@ -94,7 +94,7 @@ def _billing_failure(error, operation):
     if not re.fullmatch(r"[A-Za-z0-9_]{1,24}", code):
         code = "unknown"
     logging.getLogger("vulnscan.billing").warning(
-        "operation=%s error_type=%s code=%s; checkout requires usuarios.stripe_customer_id and stripe_subscription_id; review migrations 001/002",
+        "operation=%s error_type=%s code=%s",
         operation, type(error).__name__, code,
     )
     st.error(_vs_translate("No se puede abrir el pago ahora. La configuración de facturación necesita revisión; no se ha confirmado ninguna compra."))
