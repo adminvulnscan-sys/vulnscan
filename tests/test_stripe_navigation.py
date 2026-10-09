@@ -54,6 +54,8 @@ class NavigationTests(unittest.TestCase):
         self.assertEqual(create.call_args_list[0], create.call_args_list[1])
         self.assertEqual(errors.call_count, 2)
         ui.rerun.assert_not_called()
+        self.assertTrue(bridge.call_args.kwargs['data']['failed'])
+        self.assertNotIn('_stripe_redirect_buy', ui.session_state)
 
     @patch.object(navigation, 'intent_bridge', return_value=SimpleNamespace(intent=INTENT))
     def test_completed_attempt_rotates_only_on_explicit_click(self, bridge):

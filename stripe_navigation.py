@@ -1,4 +1,4 @@
-"""One-click, same-tab Stripe navigation using Streamlit's component v2 API."""
+"""One-click external Stripe tab, opened during the actual user gesture."""
 import hashlib
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -25,12 +25,13 @@ def stripe_action(ui, *, label, key, scope, create, on_error, **options):
     bridge_key = 'stripe_bridge_' + key
     known_intent = ui.session_state.get(bridge_key, {}).get('intent')
     result = intent_bridge(key=bridge_key,
-        data={'scope': scope_hash, 'known_intent': known_intent, **pending}, height=0,
+        data={'scope': scope_hash, 'button_key': key, 'known_intent': known_intent,
+              'language': ui.session_state.get('_vs_lang', 'es'), **pending}, height=0,
         on_intent_change=lambda: None, on_redirect_error_change=lambda: None)
     if getattr(result, 'redirect_error', False):
-        ui.error('No se pudo abrir Stripe. Revisa el navegador y vuelve a pulsar el mismo botón.'
+        ui.error('No se pudo abrir Stripe. Permite las ventanas emergentes de esta web y vuelve a pulsar el mismo botón.'
                  if ui.session_state.get('_vs_lang', 'es') != 'en' else
-                 'Could not open Stripe. Check your browser and click the same button again.')
+                 'Could not open Stripe. Allow pop-ups for this website and click the same button again.')
     intent = pending.get('rotate') or getattr(result, 'intent', None)
     try:
         intent = str(UUID(intent))
@@ -59,3 +60,7 @@ def stripe_action(ui, *, label, key, scope, create, on_error, **options):
         ui.rerun()
     except Exception as error:
         on_error(error)
+        # Deliver failure to the already-mounted bridge without hiding the error.
+        intent_bridge(key='stripe_failure_' + key,
+            data={'scope': scope_hash, 'failed': True}, height=0,
+            on_intent_change=lambda: None, on_redirect_error_change=lambda: None)
