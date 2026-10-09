@@ -24,6 +24,11 @@ import requests
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from billing import *
+from stripe_navigation import stripe_action
+import stripe_navigation
+if st.query_params.get("real_bridge") != "1":
+    stripe_navigation.intent_bridge = lambda **kwargs: SimpleNamespace(
+        intent="00000000-0000-4000-8000-000000000099", redirect_error=False)
 
 
 def blocked(*args, **kwargs):
@@ -56,7 +61,7 @@ class SchemaError(Exception):
 
 def fake_checkout(**kwargs):
     st.session_state["preview_checkouts"] = st.session_state.get("preview_checkouts",0)+1
-    return SimpleNamespace(url="https://example.invalid/mock-checkout")
+    return SimpleNamespace(url="https://checkout.stripe.com/mock-checkout")
 
 class Client:
     auth = SimpleNamespace(get_user=lambda: SimpleNamespace(user=SimpleNamespace(email="cliente@example.invalid", id="00000000-0000-0000-0000-000000000001")), sign_out=lambda: None)

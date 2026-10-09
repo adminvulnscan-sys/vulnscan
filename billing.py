@@ -8,6 +8,16 @@ import logging
 import time
 
 
+class CheckoutIntentClosed(Exception):
+    """The existing attempt was completed/expired; a new deliberate click may renew it."""
+
+
+def stripe_idempotency(user_id, intent, payload):
+    import hashlib
+    encoded = json.dumps([str(user_id), intent, payload], sort_keys=True, separators=(',', ':'))
+    return 'vulnscan-' + hashlib.sha256(encoded.encode()).hexdigest()
+
+
 def effective_plan(client, profile, now=None):
     """Resolve access without changing stored plan, credits or Stripe state."""
     now = time.time() if now is None else now
@@ -117,13 +127,15 @@ def finish_scan(state, completed=False):
         state.pop("_scan_credit_pending", None)
 
 
-def customer_portal(stripe, client, email, return_url):
+def customer_portal(stripe, client, email, return_url, idempotency_key=None):
     user = authenticated_user(client, email)
     rows = client.table("usuarios").select("stripe_customer_id").eq("email", user.email).execute().data
     if not rows or not rows[0].get("stripe_customer_id"):
         raise ValueError("No hay un cliente Stripe vinculado")
-    return stripe.billing_portal.Session.create(customer=rows[0]["stripe_customer_id"],
-                                              return_url=return_url).url
+    params = dict(customer=rows[0]["stripe_customer_id"], return_url=return_url)
+    if idempotency_key:
+        params['idempotency_key'] = stripe_idempotency(user.id, idempotency_key, params)
+    return stripe.billing_portal.Session.create(**params).url
 
 
 def change_subscription(stripe, client, email, cancel):
@@ -176,3 +188,6 @@ def clear_account_state(state):
     )
     for key in keys:
         state.pop(key, None)
+    for key in list(state):
+        if key.startswith('_stripe_redirect_'):
+            state.pop(key, None)

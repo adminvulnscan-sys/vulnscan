@@ -28,7 +28,8 @@ import time
 import streamlit as st
 
 from supabase import create_client, Client
-from billing import (effective_plan, session_client, authenticated_user, refresh_payment_return,
+from stripe_navigation import stripe_action
+from billing import (CheckoutIntentClosed, stripe_idempotency, effective_plan, session_client, authenticated_user, refresh_payment_return,
                      change_subscription, clear_account_state, price_catalog,
                      require_public_key, spend_credit, customer_portal,
                      begin_scan, finish_scan, ScanBusy, pending_scan_credit)
@@ -47,7 +48,7 @@ stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 STRIPE_PRICES = price_catalog()
 
 
-def generar_link_pago(price_id, email_usuario, tipo_compra, modo):
+def generar_link_pago(price_id, email_usuario, tipo_compra, modo, idempotency_key=None):
     """Genera una sesión de Stripe Checkout y devuelve su URL."""
     user = authenticated_user(supabase, email_usuario)
     expected_mode = "subscription" if tipo_compra.endswith("_recurrente") else "payment"
@@ -68,10 +69,13 @@ def generar_link_pago(price_id, email_usuario, tipo_compra, modo):
             if current.get("status") not in ("canceled", "incomplete_expired"):
                 if current.get("metadata", {}).get("user_id") != str(user.id) or current.get("customer") != extra.get("customer"):
                     raise ValueError("No se pudo verificar la suscripcion")
-                portal = stripe.billing_portal.Session.create(customer=extra["customer"], return_url=os.getenv("APP_URL", "http://localhost:8501"))
+                portal_args = dict(customer=extra["customer"], return_url=os.getenv("APP_URL", "http://localhost:8501"))
+                if idempotency_key:
+                    portal_args['idempotency_key'] = stripe_idempotency(user.id, idempotency_key, portal_args)
+                portal = stripe.billing_portal.Session.create(**portal_args)
                 return portal.url
         extra["subscription_data"] = {"metadata": {"user_id": str(user.id), "email": user.email}}
-    session = stripe.checkout.Session.create(
+    params = dict(
         # Payment methods are managed in the Stripe Dashboard, not sent here.
         line_items=[{'price': price_id, 'quantity': 1}],
         mode=modo,
@@ -80,6 +84,11 @@ def generar_link_pago(price_id, email_usuario, tipo_compra, modo):
         success_url=os.getenv("APP_URL", "http://localhost:8501") + "/?pago=exitoso&session_id={CHECKOUT_SESSION_ID}",
         cancel_url=os.getenv("APP_URL", "http://localhost:8501") + "/?pago=cancelado",
     )
+    if idempotency_key:
+        params['idempotency_key'] = stripe_idempotency(user.id, idempotency_key, params)
+    session = stripe.checkout.Session.create(**params)
+    if getattr(session, 'status', None) in ('complete', 'expired'):
+        raise CheckoutIntentClosed()
     return session.url
 
 
@@ -101,13 +110,9 @@ def _billing_failure(error, operation):
 
 
 def _purchase_button(price_id, email, kind, mode, label, key, **options):
-    # Rendering, tabs and language changes never create a Checkout session.
-    if st.button(label, key=key, **options):
-        try:
-            url = generar_link_pago(price_id, email, kind, mode)
-            st.link_button(_vs_translate("Continuar al pago seguro"), url=url, **options)
-        except Exception as error:
-            _billing_failure(error, "checkout")
+    stripe_action(st, label=label, key=key, scope=email + ':' + kind,
+        create=lambda attempt: generar_link_pago(price_id, email, kind, mode, idempotency_key=attempt),
+        on_error=lambda error: _billing_failure(error, "checkout"), **options)
 
 
 # --- INICIALIZACIÓN DE MEMORIA (Paso 1) ---
@@ -481,7 +486,6 @@ _VS_TRANSLATIONS = {
 }
 
 _VS_TRANSLATIONS.update({
-    "Continuar al pago seguro": "Continue to secure payment",
     "No se puede abrir el pago ahora. La configuración de facturación necesita revisión; no se ha confirmado ninguna compra.": "Payment cannot be opened right now. Billing configuration needs review; no purchase has been confirmed.",
     "Créditos activos": "Active scan credits",
     "Créditos OWASP": "OWASP credits",
@@ -3627,12 +3631,12 @@ curl -X POST https://api.vulnscan.com/v1/scans \\
         
         col_b1, col_b2 = st.columns(2)
         with col_b1:
-            if st.button("Gestionar tarjetas y facturacion", key="open_billing_portal", width="stretch"):
-                try:
-                    portal_url = customer_portal(stripe, supabase, st.session_state.get("email_usuario", ""), os.getenv("APP_URL", "http://localhost:8501"))
-                    st.link_button(_vs_translate("Continuar al pago seguro"), url=portal_url, width="stretch")
-                except Exception as error:
-                    _billing_failure(error, "portal")
+            stripe_action(st, label=_vs_translate("Gestionar tarjetas y facturacion"),
+                key="open_billing_portal", scope=st.session_state.get("email_usuario", "") + ':portal',
+                create=lambda attempt: customer_portal(stripe, supabase,
+                    st.session_state.get("email_usuario", ""), os.getenv("APP_URL", "http://localhost:8501"),
+                    idempotency_key=attempt),
+                on_error=lambda error: _billing_failure(error, "portal"), width="stretch")
         with col_b2:
             email_pago = st.session_state.get("email_usuario", "")
             usuario_logueado = bool(st.session_state.get("usuario_autenticado")) and bool(email_pago)
