@@ -32,7 +32,8 @@ from stripe_navigation import stripe_action
 from billing import (CheckoutIntentClosed, stripe_idempotency, effective_plan, session_client, authenticated_user, refresh_payment_return,
                      change_subscription, clear_account_state, price_catalog,
                      require_public_key, spend_credit, customer_portal,
-                     begin_scan, finish_scan, ScanBusy, pending_scan_credit, payment_return_url)
+                     begin_scan, finish_scan, ScanBusy, pending_scan_credit)
+from payment_urls import payment_return_url
 from motores import _motor_basic_pasivo, _motor_pro_activo, _motor_enterprise_owasp
 
 # --- CONEXIÓN A SUPABASE ---
@@ -50,7 +51,7 @@ STRIPE_PRICES = price_catalog()
 
 def generar_link_pago(price_id, email_usuario, tipo_compra, modo, idempotency_key=None, language="es"):
     """Genera una sesión de Stripe Checkout y devuelve su URL."""
-    from billing import payment_return_url
+    from payment_urls import payment_return_url
     user = authenticated_user(supabase, email_usuario)
     expected_mode = "subscription" if tipo_compra.endswith("_recurrente") else "payment"
     if price_id != STRIPE_PRICES.get(tipo_compra) or modo != expected_mode:
