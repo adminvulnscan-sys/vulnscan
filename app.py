@@ -448,6 +448,9 @@ _VS_TRANSLATIONS = {
     "Reporte generado correctamente. Ya puedes descargarlo.": "Report generated successfully. You can now download it.",
     "Plan Actual (Activo)": "Current Plan (Active)",
     "Bajar al Plan Basic": "Downgrade to Basic",
+    "Cancelación al finalizar el periodo": "Cancellation at the end of the billing period",
+    "Renovación reactivada": "Renewal reactivated",
+    "Acceso hasta": "Access until",
     "Iniciar Prueba Gratuita (14 días)": "Start Free Trial (14 days)",
     "Generar Nueva Key": "Generate New Key",
     "Probar Webhook": "Test Webhook",
@@ -791,7 +794,15 @@ def _cambiar_renovacion(cancelar):
     except Exception:
         st.error("Stripe no confirmo el cambio. No se ha actualizado tu suscripcion local.")
         return False
+    import time
     st.session_state.update(estado)
+    st.session_state['_renewal_confirmed'] = {
+        'email': st.session_state.get('email_usuario'),
+        'cancelacion_pendiente': estado['cancelacion_pendiente'],
+        'fecha_vencimiento': estado['fecha_vencimiento'],
+        'expires': time.time() + 120,
+    }
+    st.session_state['_renewal_notice'] = bool(cancelar)
     return True
 
 
@@ -986,6 +997,21 @@ def _aplicar_fila_usuario_a_sesion(datos):
     st.session_state["api_key_configurada"] = bool(datos.get("api_key_real"))
     st.session_state["webhook_url"] = datos.get("webhook_url", "")
     st.session_state["cancelacion_pendiente"] = datos.get("cancelacion_pendiente", False)
+    # A delayed webhook must not overwrite Stripe's just-confirmed UI state.
+    # This overlay affects cancellation/date only, never entitlements or credits.
+    confirmed = st.session_state.get('_renewal_confirmed')
+    if confirmed:
+        import time
+        if (confirmed['email'] != datos.get('email') or
+                confirmed['email'] != st.session_state.get('email_usuario') or
+                confirmed['expires'] <= time.time()):
+            st.session_state.pop('_renewal_confirmed', None)
+        elif (bool(datos.get('cancelacion_pendiente')) == confirmed['cancelacion_pendiente']
+                and datos.get('fecha_vencimiento') == confirmed['fecha_vencimiento']):
+            st.session_state.pop('_renewal_confirmed', None)
+        else:
+            st.session_state['cancelacion_pendiente'] = confirmed['cancelacion_pendiente']
+            st.session_state['fecha_vencimiento'] = confirmed['fecha_vencimiento']
     try:
         base_esc = datos.get("escaneos_realizados")
         if base_esc is None and datos.get("objetivos_escaneados") is not None:
@@ -3598,6 +3624,10 @@ curl -X POST https://api.vulnscan.com/v1/scans \\
                     st.info("El monitoreo automático está desactivado. Actívalo para que VulnScan escanee tus dominios automáticamente.")
     # --- 3. GESTIÓN DE FACTURACIÓN ---
     with tab_billing:
+        notice = st.session_state.pop('_renewal_notice', None)
+        if notice is not None:
+            message = "Cancelación al finalizar el periodo" if notice else "Renovación reactivada"
+            st.success(_vs_translate(message) + ": " + st.session_state.get('fecha_vencimiento', ''))
         st.markdown("<div class='config-card'><h3 style='margin:0; color:#f0f6fc; font-size:1.12rem;'>Detalles de Suscripción</h3></div>", unsafe_allow_html=True)
         
         if 'cancelacion_pendiente' not in st.session_state:
@@ -3611,9 +3641,9 @@ curl -X POST https://api.vulnscan.com/v1/scans \\
             color_estado = "#8b949e"
             texto_fecha = "Sin caducidad"
         elif st.session_state['cancelacion_pendiente']:
-            estado_texto = "CANCELA A FIN DE MES"
+            estado_texto = _vs_translate("Cancelación al finalizar el periodo")
             color_estado = "#FFBD45"
-            texto_fecha = f"Pierde acceso el: {fecha_calculada}"
+            texto_fecha = _vs_translate("Acceso hasta") + f": {fecha_calculada}"
         else:
             estado_texto = "ACTIVO"
             color_estado = "#00FFCC"

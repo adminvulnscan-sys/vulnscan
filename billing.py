@@ -243,6 +243,7 @@ def clear_account_state(state):
         "nivel_escaneo_guardado", "dominio_rapido", "escaneo_actual_id",
         "escaneo_actual_fecha", "escaneo_actual_riesgo", "pdf_descarga_habilitada",
         "billing_status", "billing_period_end",
+        "_renewal_confirmed", "_renewal_notice",
         "escaneo_en_curso", "_scan_credit_pending",
     )
     for key in keys:
