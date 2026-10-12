@@ -157,6 +157,16 @@ def change_subscription(stripe, client, email, cancel):
         raise
 
 
+def _subscription_response(value):
+    """Normalize SDK 15 StripeObjects, including nested metadata/items."""
+    if not isinstance(value, dict):
+        convert = getattr(value, 'to_dict', None)
+        value = convert() if callable(convert) else None
+    if not isinstance(value, dict):
+        raise ValueError('Invalid Stripe subscription response')
+    return value
+
+
 def _change_subscription(stripe, client, email, cancel, stage):
     user = authenticated_user(client, email)
     stage[0] = 'profile_lookup'
@@ -169,6 +179,7 @@ def _change_subscription(stripe, client, email, cancel, stage):
     stage[0] = 'stripe_retrieve'
     sub = stripe.Subscription.retrieve(row["stripe_subscription_id"])
     stage[0] = 'ownership_validation'
+    sub = _subscription_response(sub)
     if (not row.get("stripe_customer_id")
             or sub.get("customer") != row["stripe_customer_id"]
             or sub.get("metadata", {}).get("user_id") != str(user.id)):
@@ -178,6 +189,7 @@ def _change_subscription(stripe, client, email, cancel, stage):
     stage[0] = 'stripe_modify'
     updated = stripe.Subscription.modify(sub["id"], cancel_at_period_end=bool(cancel))
     stage[0] = 'response_validation'
+    updated = _subscription_response(updated)
     if updated.get("cancel_at_period_end") is not bool(cancel):
         raise ValueError("Stripe no confirmó el cambio")
     stage[0] = 'period_read'

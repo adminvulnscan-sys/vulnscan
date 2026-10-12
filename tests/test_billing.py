@@ -45,11 +45,48 @@ class BillingTests(unittest.TestCase):
             pass
         stripe.Subscription.retrieve.return_value = SDKResponse()
         with self.assertLogs('vulnscan.billing', level='WARNING') as logs:
-            with self.assertRaises(AttributeError):
+            with self.assertRaises(ValueError):
                 change_subscription(stripe, client(), 'a@example.test', True)
         self.assertEqual(logs.records[0].getMessage(),
-            'operation=subscription_cancel stage=ownership_validation error_type=AttributeError')
+            'operation=subscription_cancel stage=ownership_validation error_type=ValueError')
         stripe.Subscription.modify.assert_not_called()
+
+    def test_sdk_objects_cancel_and_reactivate_with_nested_item_period(self):
+        from stripe import StripeObject
+        for cancel in (True, False):
+            stripe = stripe_mock()
+            stripe.Subscription.retrieve.return_value = StripeObject.construct_from(
+                stripe.Subscription.retrieve.return_value, 'sk_test_fake')
+            stripe.Subscription.modify.return_value = StripeObject.construct_from({
+                'cancel_at_period_end': cancel,
+                'items': {'data': [{'current_period_end': 1793577600}]},
+            }, 'sk_test_fake')
+            db = client()
+            result = change_subscription(stripe, db, 'a@example.test', cancel)
+            self.assertIs(result['cancelacion_pendiente'], cancel)
+            self.assertEqual(result['fecha_vencimiento'], '02/11/2026')
+            stripe.Subscription.modify.assert_called_once_with('sub_test', cancel_at_period_end=cancel)
+            db.table.return_value.update.assert_not_called()
+
+    def test_sdk_object_wrong_owner_and_customer_never_modify(self):
+        from stripe import StripeObject
+        for cancel in (True, False):
+            for field in ('customer', 'metadata'):
+                stripe = stripe_mock()
+                payload = stripe.Subscription.retrieve.return_value
+                payload[field] = 'cus_other' if field == 'customer' else {'user_id': 'other'}
+                stripe.Subscription.retrieve.return_value = StripeObject.construct_from(payload, 'sk_test_fake')
+                with self.assertRaises(ValueError):
+                    change_subscription(stripe, client(), 'a@example.test', cancel)
+                stripe.Subscription.modify.assert_not_called()
+
+    def test_sdk_object_unconfirmed_change_is_rejected(self):
+        from stripe import StripeObject
+        stripe = stripe_mock()
+        stripe.Subscription.modify.return_value = StripeObject.construct_from(
+            {'cancel_at_period_end': False}, 'sk_test_fake')
+        with self.assertRaises(ValueError):
+            change_subscription(stripe, client(), 'a@example.test', True)
 
     def test_client_isolated_and_reused_per_session(self):
         a, b = {}, {}
