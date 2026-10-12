@@ -40,9 +40,9 @@ class PaymentReturnTests(unittest.TestCase):
         for filename in ('app.py','vulnscan.py'):
             tree=ast.parse(Path(filename).read_text(encoding='utf-8'))
             branch=next(n for n in ast.walk(tree) if isinstance(n,ast.If)
-                        and ast.unparse(n.test)=="pago_param == 'exitoso'")
+                        and ast.unparse(n.test)=="st.query_params.get('pago') == 'exitoso'")
             ui=SimpleNamespace(session_state={'usuario_autenticado':False,'tokens_pdf':1},
-                query_params={'pago':'exitoso','session_id':'unverified','lang':'en'},
+                query_params={'pago':'exitoso','session_id':'unverified','lang':'en','vista':'acceso'},
                 warning=Mock(),info=Mock())
             refresh=Mock()
             exec(compile(ast.Module(body=[branch],type_ignores=[]),filename,'exec'),

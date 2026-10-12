@@ -29,6 +29,7 @@ import streamlit as st
 
 from supabase import create_client, Client
 from stripe_navigation import stripe_action
+from billing_sync import monitor as billing_monitor, start_wait as billing_start_wait
 from billing import (CheckoutIntentClosed, stripe_idempotency, effective_plan, session_client, authenticated_user, refresh_payment_return,
                      change_subscription, clear_account_state, price_catalog,
                      require_public_key, spend_credit, customer_portal,
@@ -49,7 +50,7 @@ stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 STRIPE_PRICES = price_catalog()
 
 
-def generar_link_pago(price_id, email_usuario, tipo_compra, modo, idempotency_key=None, language="es"):
+def generar_link_pago(price_id, email_usuario, tipo_compra, modo, idempotency_key=None, language="es", on_checkout=None):
     """Genera una sesión de Stripe Checkout y devuelve su URL."""
     from payment_urls import payment_return_url
     user = authenticated_user(supabase, email_usuario)
@@ -68,6 +69,8 @@ def generar_link_pago(price_id, email_usuario, tipo_compra, modo, idempotency_ke
         rows = supabase.table("usuarios").select("stripe_subscription_id").eq("email", user.email).execute().data
         if rows and rows[0].get("stripe_subscription_id"):
             current = stripe.Subscription.retrieve(rows[0]["stripe_subscription_id"])
+            if not isinstance(current, dict):
+                current = current.to_dict()
             if current.get("status") not in ("canceled", "incomplete_expired"):
                 if current.get("metadata", {}).get("user_id") != str(user.id) or current.get("customer") != extra.get("customer"):
                     raise ValueError("No se pudo verificar la suscripcion")
@@ -75,6 +78,8 @@ def generar_link_pago(price_id, email_usuario, tipo_compra, modo, idempotency_ke
                 if idempotency_key:
                     portal_args['idempotency_key'] = stripe_idempotency(user.id, idempotency_key, portal_args)
                 portal = stripe.billing_portal.Session.create(**portal_args)
+                if on_checkout:
+                    on_checkout(None)
                 return portal.url
         extra["subscription_data"] = {"metadata": {"user_id": str(user.id), "email": user.email}}
     params = dict(
@@ -91,6 +96,8 @@ def generar_link_pago(price_id, email_usuario, tipo_compra, modo, idempotency_ke
     session = stripe.checkout.Session.create(**params)
     if getattr(session, 'status', None) in ('complete', 'expired'):
         raise CheckoutIntentClosed()
+    if on_checkout:
+        on_checkout(session.id)
     return session.url
 
 
@@ -114,7 +121,8 @@ def _billing_failure(error, operation):
 def _purchase_button(price_id, email, kind, mode, label, key, **options):
     stripe_action(st, label=label, key=key, scope=email + ':' + kind,
         create=lambda attempt: generar_link_pago(price_id, email, kind, mode, idempotency_key=attempt,
-                                                 language=st.session_state.get("_vs_lang", "es")),
+                                                 language=st.session_state.get("_vs_lang", "es"),
+            on_checkout=lambda checkout: __import__("billing_sync").start_wait(st.session_state, email, checkout)),
         on_error=lambda error: _billing_failure(error, "checkout"), **options)
 
 
@@ -1102,6 +1110,16 @@ if st.session_state.get("usuario_autenticado") and st.session_state.get("email_u
 _rehidratado = _restaurar_sesion_auth_supabase()
 if _rehidratado:
     st.session_state["datos_cliente_cargados"] = False
+# Return parameters only request observation; they never grant rights.
+if st.query_params.get('pago') == 'exitoso':
+    st.session_state['_billing_return_checkout'] = st.query_params.get('session_id')
+    for payment_key in ('pago', 'session_id'):
+        st.query_params.pop(payment_key, None)
+elif st.query_params.get('pago') == 'cancelado':
+    st.session_state.pop('_billing_wait', None)
+    st.session_state.pop('_billing_sync_status', None)
+    for payment_key in ('pago', 'session_id'):
+        st.query_params.pop(payment_key, None)
 # -----------------------------------------------------
 
 if not st.session_state['usuario_autenticado']:
@@ -1192,19 +1210,6 @@ if not st.session_state['usuario_autenticado']:
     if _query_param_terms_activo():
         st.session_state["mostrar_terminos"] = True
 
-    # Detectar vuelta de Stripe con pago exitoso
-    pago_param = st.query_params.get("pago")
-    if pago_param == "exitoso":
-        email_recarga = st.session_state.get("email_usuario", "")
-        if st.session_state.get("usuario_autenticado") and email_recarga:
-            try:
-                _confirmar_compra_pdf_tras_stripe(email_recarga)
-            except Exception:
-                st.warning("No se pudo refrescar tu perfil. Inicia sesion de nuevo.")
-        for payment_key in ("pago", "session_id"):
-            st.query_params.pop(payment_key, None)
-        st.query_params["vista"] = "acceso"
-        st.info("Vuelta de Stripe. El retorno no confirma el pago; recarga el perfil cuando se procese la confirmacion.")
 
     if st.session_state.get("mostrar_terminos"):
         st.markdown("<br>", unsafe_allow_html=True)
@@ -1979,6 +1984,15 @@ if st.session_state.get('usuario_autenticado'):
                 pass
 
         st.session_state['datos_cliente_cargados'] = True
+
+if st.session_state.get('usuario_autenticado'):
+    if '_billing_return_checkout' in st.session_state:
+        checkout = st.session_state.pop('_billing_return_checkout')
+        try:
+            billing_start_wait(st.session_state, st.session_state.get('email_usuario'), checkout)
+        except ValueError:
+            st.warning("No se pudo comprobar el retorno del pago. No repitas la compra.")
+    billing_monitor(st, supabase)
 
 with st.sidebar:
     if st.button("Cerrar Sesión"):

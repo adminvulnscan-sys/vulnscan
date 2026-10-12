@@ -196,7 +196,7 @@ class BillingTests(unittest.TestCase):
         for filename in ("app.py", "vulnscan.py"):
             tree = ast.parse(Path(filename).read_text(encoding="utf-8"))
             branch = next(n for n in ast.walk(tree) if isinstance(n, ast.If)
-                          and ast.unparse(n.test) == "pago_param == 'exitoso'")
+                          and ast.unparse(n.test) == "st.query_params.get('pago') == 'exitoso'")
             for logged_in in (False, True):
                 state = {"usuario_autenticado": logged_in, "email_usuario": "a@example.test"}
                 ui = SimpleNamespace(session_state=state,
@@ -207,10 +207,9 @@ class BillingTests(unittest.TestCase):
                              "_confirmar_compra_pdf_tras_stripe": refresh}
                 exec(compile(ast.Module(body=[branch], type_ignores=[]), filename, "exec"), namespace)
                 self.assertEqual(state["email_usuario"], "a@example.test")
-                if logged_in:
-                    refresh.assert_called_once_with("a@example.test")
-                else:
-                    refresh.assert_not_called()
+                refresh.assert_not_called()
+                self.assertNotIn('plan_activo', state)
+                self.assertNotIn('tokens_pdf', state)
 
     def test_checkout_metadata_and_price_validation(self):
         tree = ast.parse(Path("app.py").read_text(encoding="utf-8"))

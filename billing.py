@@ -244,6 +244,8 @@ def clear_account_state(state):
         "escaneo_actual_fecha", "escaneo_actual_riesgo", "pdf_descarga_habilitada",
         "billing_status", "billing_period_end",
         "_renewal_confirmed", "_renewal_notice",
+        "_billing_wait", "_billing_sync_status", "_billing_last_poll", "_billing_return_checkout",
+        "_billing_notice_until",
         "escaneo_en_curso", "_scan_credit_pending",
     )
     for key in keys:
