@@ -140,23 +140,47 @@ def customer_portal(stripe, client, email, return_url, idempotency_key=None):
 
 
 def change_subscription(stripe, client, email, cancel):
+    stage = ['authenticate']
+    try:
+        return _change_subscription(stripe, client, email, cancel, stage)
+    except Exception as exc:
+        # Fixed operation/stage labels and exception class only: no payload,
+        # traceback, email, UUID, Stripe IDs, credentials or exception message.
+        error_type = type(exc).__name__
+        if not error_type.isidentifier() or len(error_type) > 64:
+            error_type = 'UnknownError'
+        logging.getLogger('vulnscan.billing').warning(
+            'operation=%s stage=%s error_type=%s',
+            'subscription_cancel' if cancel else 'subscription_reactivate',
+            stage[0], error_type,
+        )
+        raise
+
+
+def _change_subscription(stripe, client, email, cancel, stage):
     user = authenticated_user(client, email)
+    stage[0] = 'profile_lookup'
     rows = client.table("usuarios").select(
         "stripe_subscription_id,stripe_customer_id"
     ).eq("email", user.email).execute().data
     if not rows or not rows[0].get("stripe_subscription_id"):
         raise ValueError("No hay una suscripción Stripe vinculada")
     row = rows[0]
+    stage[0] = 'stripe_retrieve'
     sub = stripe.Subscription.retrieve(row["stripe_subscription_id"])
+    stage[0] = 'ownership_validation'
     if (not row.get("stripe_customer_id")
             or sub.get("customer") != row["stripe_customer_id"]
             or sub.get("metadata", {}).get("user_id") != str(user.id)):
         raise ValueError("No se pudo verificar la titularidad")
     if sub.get("status") not in ("active", "trialing", "past_due"):
         raise ValueError("La suscripción no permite este cambio")
+    stage[0] = 'stripe_modify'
     updated = stripe.Subscription.modify(sub["id"], cancel_at_period_end=bool(cancel))
+    stage[0] = 'response_validation'
     if updated.get("cancel_at_period_end") is not bool(cancel):
         raise ValueError("Stripe no confirmó el cambio")
+    stage[0] = 'period_read'
     period = updated.get("current_period_end")
     if not period:
         period = next((item.get("current_period_end") for item in

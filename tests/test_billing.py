@@ -27,6 +27,30 @@ def stripe_mock():
 
 
 class BillingTests(unittest.TestCase):
+    def test_subscription_diagnostic_excludes_exception_payload(self):
+        for cancel in (True, False):
+            stripe = stripe_mock()
+            stripe.Subscription.modify.side_effect = RuntimeError('SECRET email@example.test cus_private')
+            with self.assertLogs('vulnscan.billing', level='WARNING') as logs:
+                with self.assertRaises(RuntimeError):
+                    change_subscription(stripe, client(), 'a@example.test', cancel)
+            operation = 'subscription_cancel' if cancel else 'subscription_reactivate'
+            self.assertEqual(logs.records[0].getMessage(),
+                f'operation={operation} stage=stripe_modify error_type=RuntimeError')
+            self.assertIsNone(logs.records[0].exc_info)
+
+    def test_subscription_diagnostic_identifies_sdk_response_failure(self):
+        stripe = stripe_mock()
+        class SDKResponse:
+            pass
+        stripe.Subscription.retrieve.return_value = SDKResponse()
+        with self.assertLogs('vulnscan.billing', level='WARNING') as logs:
+            with self.assertRaises(AttributeError):
+                change_subscription(stripe, client(), 'a@example.test', True)
+        self.assertEqual(logs.records[0].getMessage(),
+            'operation=subscription_cancel stage=ownership_validation error_type=AttributeError')
+        stripe.Subscription.modify.assert_not_called()
+
     def test_client_isolated_and_reused_per_session(self):
         a, b = {}, {}
         factory = Mock(side_effect=[client(), client("b@example.test", "b")])
