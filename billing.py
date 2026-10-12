@@ -8,6 +8,28 @@ import logging
 import time
 from payment_urls import PUBLIC_APP_URL, payment_return_url
 
+BILLING_DIAGNOSTIC_REVISION = 'subscription-sdk-diagnostics-v2'
+# This literal identifies the code actually imported, not a file read later
+# from disk (which could differ from an already cached module).
+logging.getLogger('vulnscan.billing').warning(
+    'operation=billing_module_loaded revision=%s', BILLING_DIAGNOSTIC_REVISION,
+)
+
+
+def _billing_failure_location(error):
+    """Read frame coordinates only; never format traceback, source or locals."""
+    location = ('unknown', 'unknown', 0)
+    frame = error.__traceback__
+    while frame is not None:
+        module = frame.tb_frame.f_globals.get('__name__', '')
+        function = frame.tb_frame.f_code.co_name
+        if (module == __name__ or module.startswith('stripe.')) and (
+                all(part.isidentifier() for part in module.split('.'))
+                and len(module) <= 120 and function.isidentifier() and len(function) <= 64):
+            location = (module, function, frame.tb_lineno)
+        frame = frame.tb_next
+    return location
+
 
 class CheckoutIntentClosed(Exception):
     """The existing attempt was completed/expired; a new deliberate click may renew it."""
@@ -144,15 +166,15 @@ def change_subscription(stripe, client, email, cancel):
     try:
         return _change_subscription(stripe, client, email, cancel, stage)
     except Exception as exc:
-        # Fixed operation/stage labels and exception class only: no payload,
-        # traceback, email, UUID, Stripe IDs, credentials or exception message.
+        # Frame coordinates only, never formatted traceback, source or values.
         error_type = type(exc).__name__
         if not error_type.isidentifier() or len(error_type) > 64:
             error_type = 'UnknownError'
+        module, function, line = _billing_failure_location(exc)
         logging.getLogger('vulnscan.billing').warning(
-            'operation=%s stage=%s error_type=%s',
+            'operation=%s stage=%s error_type=%s revision=%s module=%s function=%s line=%s',
             'subscription_cancel' if cancel else 'subscription_reactivate',
-            stage[0], error_type,
+            stage[0], error_type, BILLING_DIAGNOSTIC_REVISION, module, function, line,
         )
         raise
 

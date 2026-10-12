@@ -35,8 +35,12 @@ class BillingTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     change_subscription(stripe, client(), 'a@example.test', cancel)
             operation = 'subscription_cancel' if cancel else 'subscription_reactivate'
-            self.assertEqual(logs.records[0].getMessage(),
-                f'operation={operation} stage=stripe_modify error_type=RuntimeError')
+            message = logs.records[0].getMessage()
+            self.assertTrue(message.startswith(
+                f'operation={operation} stage=stripe_modify error_type=RuntimeError '))
+            self.assertIn('revision=subscription-sdk-diagnostics-v2 module=billing function=_change_subscription line=', message)
+            for secret in ('SECRET', 'email@example.test', 'cus_private', 'a@example.test'):
+                self.assertNotIn(secret, message)
             self.assertIsNone(logs.records[0].exc_info)
 
     def test_subscription_diagnostic_identifies_sdk_response_failure(self):
@@ -47,9 +51,30 @@ class BillingTests(unittest.TestCase):
         with self.assertLogs('vulnscan.billing', level='WARNING') as logs:
             with self.assertRaises(ValueError):
                 change_subscription(stripe, client(), 'a@example.test', True)
-        self.assertEqual(logs.records[0].getMessage(),
-            'operation=subscription_cancel stage=ownership_validation error_type=ValueError')
+        self.assertTrue(logs.records[0].getMessage().startswith(
+            'operation=subscription_cancel stage=ownership_validation error_type=ValueError '))
+        self.assertIn('function=_subscription_response line=', logs.records[0].getMessage())
         stripe.Subscription.modify.assert_not_called()
+
+    def test_diagnostic_reports_exact_frame_line_without_source_or_locals(self):
+        import billing
+        try:
+            billing._subscription_response(object())
+        except ValueError as error:
+            module, function, line = billing._billing_failure_location(error)
+            last = error.__traceback__
+            while last.tb_next is not None:
+                last = last.tb_next
+            self.assertEqual((module, function, line),
+                ('billing', '_subscription_response', last.tb_lineno))
+
+    def test_module_revision_is_logged_without_remote_calls(self):
+        import subprocess
+        import sys
+        script = "import socket; socket.socket=lambda *a, **k: (_ for _ in ()).throw(AssertionError('network forbidden')); import billing"
+        result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('operation=billing_module_loaded revision=subscription-sdk-diagnostics-v2', result.stderr)
 
     def test_sdk_objects_cancel_and_reactivate_with_nested_item_period(self):
         from stripe import StripeObject
