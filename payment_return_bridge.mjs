@@ -18,9 +18,15 @@ export default function ({data, setTriggerValue}) {
       // This listener is mounted only in the already authenticated tab.
       // Matching a Checkout can focus that tab; it never authenticates another.
       setTriggerValue('returned', msg.nonce);
+      const owned = globalThis[Symbol.for('vulnscan.checkoutTabs')]?.get(data.checkout);
       // WindowProxy.focus/close are permitted across origins. No parent DOM
       // reads, navigation or changes to iframe sandbox restrictions.
       try { window.top.focus(); } catch { /* Browser may deny focus. */ }
+      // Close from the creator's retained reference. Closing window.top from
+      // the returning Streamlit iframe was rejected by the real browser.
+      if (owned && !owned.closed) {
+        try { owned.close(); } catch { /* A retry remains harmless. */ }
+      }
       channel.postMessage({type: 'ack', checkout: data.checkout, nonce: msg.nonce});
     };
   } else if (data.role === 'return') {
@@ -29,9 +35,8 @@ export default function ({data, setTriggerValue}) {
       if (msg?.type !== 'ack' || msg.checkout !== data.checkout || msg.nonce !== nonce) return;
       clearInterval(retry); clearTimeout(timeout);
       setTriggerValue('resumed', true);
-      // Checkout was opened by script. If the browser refuses to close it,
-      // the UI tells the user to continue in the original authenticated tab.
-      try { window.top.close(); } catch { /* The fallback stays visible. */ }
+      // The creator closes its retained reference; this is only a fallback.
+      try { window.top.close(); } catch { /* No credential transfer. */ }
     };
     notify();
     retry = setInterval(notify, 500);

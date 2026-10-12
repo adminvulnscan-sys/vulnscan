@@ -16,15 +16,11 @@ def listen(ui, checkout, role):
 
 def show_return(ui, checkout):
     result = listen(ui, checkout, 'return')
-    english = ui.session_state.get('_vs_lang') == 'en'
     if getattr(result, 'unavailable', False):
-        ui.info('The original session could not be reached. Sign in to continue.' if english else
-                'No se ha podido recuperar la pestaña original. Inicia sesión para continuar.')
         return  # Normal authenticated login; Checkout proves no identity.
     if getattr(result, 'resumed', False):
-        ui.info('Continue in your original VulnScan tab. You can close this tab.' if english else
-                'Continúa en tu pestaña original de VulnScan. Puedes cerrar esta pestaña.')
-    else:
-        ui.info('Returning to your open VulnScan session…' if english else
-                'Volviendo a tu sesión abierta de VulnScan…')
+        ui.stop()
+        return
+    # The creator closes the returning popup before app startup where possible.
+    # The backup notification never renders a message or claims authentication.
     ui.stop()

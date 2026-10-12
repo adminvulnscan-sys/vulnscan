@@ -26,6 +26,7 @@ def stripe_action(ui, *, label, key, scope, create, on_error, **options):
     known_intent = ui.session_state.get(bridge_key, {}).get('intent')
     result = intent_bridge(key=bridge_key,
         data={'scope': scope_hash, 'button_key': key, 'known_intent': known_intent,
+              'checkout': (ui.session_state.get('_billing_open_checkout') or {}).get('checkout'),
               'language': ui.session_state.get('_vs_lang', 'es'), **pending}, height=0,
         on_intent_change=lambda: None, on_redirect_error_change=lambda: None)
     if getattr(result, 'redirect_error', False):

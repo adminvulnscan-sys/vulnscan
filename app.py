@@ -28,8 +28,14 @@ import time
 import streamlit as st
 
 from supabase import create_client, Client
-from stripe_navigation import stripe_action
-from billing_sync import monitor as billing_monitor, start_wait as billing_start_wait
+import stripe_navigation as _stripe_navigation_module
+stripe_action = importlib.reload(_stripe_navigation_module).stripe_action
+import billing_sync as _billing_sync_module
+import payment_return_bridge as _payment_return_module
+importlib.reload(_payment_return_module)
+_billing_sync_module = importlib.reload(_billing_sync_module)
+billing_monitor = _billing_sync_module.monitor
+billing_start_wait = _billing_sync_module.start_wait
 from billing import (CheckoutIntentClosed, stripe_idempotency, effective_plan, session_client, authenticated_user, refresh_payment_return,
                      change_subscription, clear_account_state, price_catalog,
                      require_public_key, spend_credit, customer_portal,
