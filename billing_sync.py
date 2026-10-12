@@ -15,6 +15,8 @@ def start_wait(state, email, checkout=None, now=None):
     if old and old['email'] == email and old['checkout'] == checkout and old['deadline'] > now:
         return  # Re-rendering/double clicks do not extend the wait indefinitely.
     state['_billing_wait'] = {'email': email, 'checkout': checkout, 'deadline': now + 120}
+    if checkout:
+        state['_billing_open_checkout'] = {'email': email, 'checkout': checkout, 'expires': now + 3600}
     state['_billing_sync_status'] = 'processing'
     state.pop('_billing_last_poll', None)
 
@@ -82,6 +84,15 @@ def poll(state, client, now=None):
 
 
 def monitor(ui, client):
+    from payment_return_bridge import listen
+    opened = ui.session_state.get('_billing_open_checkout')
+    if (ui.session_state.get('usuario_autenticado') and opened
+            and opened['email'] == ui.session_state.get('email_usuario') and opened['expires'] > time.time()):
+        returned = listen(ui, opened['checkout'], 'source')
+        event = getattr(returned, 'returned', None)
+        if event and event != ui.session_state.get('_billing_return_event'):
+            ui.session_state['_billing_return_event'] = event
+            start_wait(ui.session_state, opened['email'], opened['checkout'])
     @ui.fragment(run_every='5s')
     def render():
         if poll(ui.session_state, client):

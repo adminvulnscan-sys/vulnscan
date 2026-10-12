@@ -1122,6 +1122,10 @@ elif st.query_params.get('pago') == 'cancelado':
         st.query_params.pop(payment_key, None)
 # -----------------------------------------------------
 
+if not st.session_state.get('usuario_autenticado') and st.session_state.get('_billing_return_checkout'):
+    from payment_return_bridge import show_return
+    show_return(st, st.session_state['_billing_return_checkout'])
+
 if not st.session_state['usuario_autenticado']:
     st.markdown(
         """
