@@ -5,6 +5,8 @@ from supabase import create_client
 from dotenv import load_dotenv
 import requests
 from motores import _motor_basic_pasivo, _motor_pro_activo, _motor_enterprise_owasp
+from scan_reservation import (begin_scan, finish_scan, run_reserved_scan,
+                              service_scan_client, store_scan, ScanBusy)
 from app import _clasificar_hallazgos_pdf, _preparar_resultados_pdf
 
 load_dotenv()
@@ -48,7 +50,7 @@ def enviar_webhook(webhook_url, dominio, resultados, tipo_escaneo):
     except Exception as e:
         print(f"[Webhook] Error enviando a {webhook_url}: {e}")
 
-def guardar_escaneo_supabase(email, dominio, tipo, resultados):
+def guardar_escaneo_supabase(email, dominio, tipo, resultados, state, client):
     try:
         fallos_r, _, _ = _clasificar_hallazgos_pdf(_preparar_resultados_pdf(resultados))
         crit_r = sum(1 for r in fallos_r if any(t in r for t in ('[CRITICO]', '[ALERTA]', '[ALTO]')))
@@ -62,17 +64,32 @@ def guardar_escaneo_supabase(email, dominio, tipo, resultados):
         else:
             nivel_riesgo_real = "CRITICO (Alto Riesgo)"
 
-        supabase.table("escaneos").insert({
+        return store_scan(state, client, {
             "email_cliente": email,
             "dominio": dominio,
             "tipo": tipo,
             "fecha": datetime.now().strftime("%d/%m/%Y"),
             "riesgo": nivel_riesgo_real,
             "resultados_json": json.dumps(resultados)
-        }).execute()
-        print(f"[Supabase] Escaneo guardado para {email} - {dominio}")
+        })
     except Exception as e:
-        print(f"[Supabase] Error guardando escaneo: {e}")
+        raise RuntimeError('Report persistence not confirmed') from None
+
+
+def ejecutar_escaneo_reservado(email, dominio, tipo, motor, *args):
+    client = service_scan_client(supabase, email)
+    state = {'email_usuario': email}
+    target = dominio.replace('https://', '').replace('http://', '').split('/')[0]
+    try:
+        begin_scan(state, client, None, target, tipo)
+        results = run_reserved_scan(state, client, motor, dominio, *args)
+        guardar_escaneo_supabase(email, dominio, tipo, results, state, client)
+    except ScanBusy:
+        print('[Scheduler] Cuenta ocupada; no se inicia otro motor.')
+    except Exception as error:
+        print('[Scheduler] Escaneo no confirmado; error_type=' + type(error).__name__)
+    finally:
+        finish_scan(state, client)
 
 def main():
     print(f"[Scheduler] Iniciando {datetime.now().strftime('%d/%m/%Y %H:%M')}")
@@ -114,7 +131,9 @@ def main():
             # Obtener última fecha por tipo de escaneo
             def get_ultima_fecha(tipo):
                 try:
-                    r = supabase.table("escaneos").select("fecha").eq("email_cliente", email).eq("dominio", dominio).eq("tipo", tipo).order("id", desc=True).limit(1).execute()
+                    aliases = {'Rápido (Passive)': ['Rápido (Passive)', 'Rapido (Passive)'],
+                               'Auditoría Completa (OWASP)': ['Auditoría Completa (OWASP)', 'Auditoria Completa (OWASP)']}
+                    r = supabase.table("escaneos").select("fecha").eq("email_cliente", email).eq("dominio", dominio).in_("tipo", aliases.get(tipo, [tipo])).order("id", desc=True).limit(1).execute()
                     return r.data[0]["fecha"] if r.data else None
                 except Exception:
                     return None
@@ -122,11 +141,10 @@ def main():
             # --- Escaneo Basic ---
             print(f"  [DEBUG] BASIC -> on_passive={on_passive}, freq_passive={freq_passive}")
             if on_passive and freq_passive > 0:
-                ultima = get_ultima_fecha("Rapido (Passive)")
+                ultima = get_ultima_fecha("Rápido (Passive)")
                 if debe_escanear_hoy(ultima, freq_passive):
                     print(f"[Scheduler] Ejecutando Basic para {dominio}")
-                    resultados = _motor_basic_pasivo(dominio)
-                    guardar_escaneo_supabase(email, dominio, "Rapido (Passive)", resultados)
+                    ejecutar_escaneo_reservado(email, dominio, "Rápido (Passive)", _motor_basic_pasivo)
                 else:
                     print(f"    -> Saltando BASIC: No han pasado los dias necesarios desde {ultima}")
 
@@ -136,8 +154,7 @@ def main():
                 ultima = get_ultima_fecha("Profundo (Active)")
                 if debe_escanear_hoy(ultima, freq_pro):
                     print(f"[Scheduler] Ejecutando Pro para {dominio}")
-                    resultados = _motor_pro_activo(dominio, True)
-                    guardar_escaneo_supabase(email, dominio, "Profundo (Active)", resultados)
+                    ejecutar_escaneo_reservado(email, dominio, "Profundo (Active)", _motor_pro_activo, True)
                 else:
                     print(f"    -> Saltando PRO: No han pasado los dias necesarios desde {ultima}")
             else:
@@ -146,11 +163,10 @@ def main():
             # --- Escaneo Enterprise ---
             print(f"  [DEBUG] ENT -> plan={plan}, on_ent={on_ent}, freq_ent={freq_ent}")
             if plan == "Enterprise" and on_ent and freq_ent > 0:
-                ultima = get_ultima_fecha("Auditoria Completa (OWASP)")
+                ultima = get_ultima_fecha("Auditoría Completa (OWASP)")
                 if debe_escanear_hoy(ultima, freq_ent):
                     print(f"[Scheduler] Ejecutando Enterprise para {dominio}")
-                    resultados = _motor_enterprise_owasp(dominio)
-                    guardar_escaneo_supabase(email, dominio, "Auditoria Completa (OWASP)", resultados)
+                    ejecutar_escaneo_reservado(email, dominio, "Auditoría Completa (OWASP)", _motor_enterprise_owasp)
                 else:
                     print(f"    -> Saltando ENT: No han pasado los dias necesarios desde {ultima}")
             else:

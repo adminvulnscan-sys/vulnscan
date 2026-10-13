@@ -110,8 +110,7 @@ def spend_credit(client, credit, operation):
     return result["remaining"]
 
 
-class ScanBusy(ValueError):
-    pass
+from scan_reservation import ScanBusy
 
 
 def pending_scan_credit(state, target, scan_type):
@@ -125,29 +124,13 @@ def pending_scan_credit(state, target, scan_type):
 
 
 def begin_scan(state, client, credit, target, scan_type):
-    """Claim the session BEFORE spending; retry an uncertain RPC with the same ID."""
-    if state.get("escaneo_en_curso"):
-        raise ScanBusy("Ya hay un escaneo en curso")
-    state["escaneo_en_curso"] = True
-    try:
-        identity = (state.get("email_usuario"), credit, target, scan_type)
-        pending = state.get("_scan_credit_pending")
-        if pending and tuple(pending["identity"]) != identity:
-            raise ValueError("Hay un consumo pendiente para otro objetivo; reintenta el anterior")
-        if credit:
-            if not pending:
-                pending = {"identity": identity, "operation": str(uuid4())}
-                state["_scan_credit_pending"] = pending
-            state[credit] = spend_credit(client, credit, pending["operation"])
-    except BaseException:
-        state["escaneo_en_curso"] = False
-        raise
+    from scan_reservation import begin_scan as reserve
+    return reserve(state, client, credit, target, scan_type)
 
 
-def finish_scan(state, completed=False):
-    state["escaneo_en_curso"] = False
-    if completed:
-        state.pop("_scan_credit_pending", None)
+def finish_scan(state, client, completed=False, report_id=None):
+    from scan_reservation import finish_scan as finish
+    return finish(state, client, completed=completed, report_id=report_id)
 
 
 def customer_portal(stripe, client, email, return_url, idempotency_key=None):

@@ -10,6 +10,7 @@ public_entry(st)
 import os
 import base64
 import json
+import logging
 from datetime import datetime
 from fpdf import FPDF
 import requests
@@ -41,6 +42,7 @@ from billing import (CheckoutIntentClosed, stripe_idempotency, effective_plan, s
                      require_public_key, spend_credit, customer_portal,
                      begin_scan, finish_scan, ScanBusy, pending_scan_credit)
 from payment_urls import payment_return_url
+from scan_reservation import run_reserved_scan, store_scan
 from motores import _motor_basic_pasivo, _motor_pro_activo, _motor_enterprise_owasp
 
 # --- CONEXIÓN A SUPABASE ---
@@ -2407,8 +2409,8 @@ with menu_dashboard:
                             token_a_gastar = pending_token or token_a_gastar
                             try:
                                 begin_scan(st.session_state, supabase, token_a_gastar, dominio_limpio_scan, nivel)
-                            except ScanBusy:
-                                st.info("Ya hay un escaneo en curso. No se ha gastado otro credito.")
+                            except ScanBusy as error:
+                                st.info(str(error))
                                 st.stop()
                             except Exception:
                                 st.error("No se pudo confirmar el credito; reintenta el mismo objetivo y nivel.")
@@ -2421,8 +2423,8 @@ with menu_dashboard:
                                 )
                                 with st.status(f"Iniciando análisis real sobre {dom}...") as s:
                                     st.write(msg_status)
-                                    resultados_auditoria = escanear_objetivo_real(
-                                        dom,
+                                    resultados_auditoria = run_reserved_scan(
+                                        st.session_state, supabase, escanear_objetivo_real, dom,
                                         incluir_puertos=incluir_puertos,
                                         incluir_cve_matching=incluir_cve,
                                         incluir_owasp=incluir_owasp,
@@ -2447,9 +2449,6 @@ with menu_dashboard:
                                     st.session_state['escaneo_actual_fecha'] = datetime.now().strftime("%d/%m/%Y")
                                     st.session_state['escaneo_actual_riesgo'] = "Medio"
 
-                                    registrar_dominio_cliente(email_u, dom)
-                                    registrar_objetivo_mes_si_nuevo(email_u, dom)
-
                                     fallos_riesgo, _, _ = _clasificar_hallazgos_pdf(_preparar_resultados_pdf(resultados_auditoria))
                                     crit_r = sum(1 for r in fallos_riesgo if any(t in r for t in ('[CRITICO]', '[ALERTA]', '[ALTO]')))
                                     med_r = sum(1 for r in fallos_riesgo if '[MEDIO]' in r)
@@ -2470,6 +2469,11 @@ with menu_dashboard:
                                         "riesgo": nivel_riesgo_real,
                                         "resultados_json": json.dumps(resultados_auditoria)
                                     }
+                                    nuevo_escaneo["id"] = store_scan(st.session_state, supabase, nuevo_escaneo)
+
+                                    registrar_dominio_cliente(email_u, dom)
+                                    registrar_objetivo_mes_si_nuevo(email_u, dom)
+
                                     st.session_state['historial_escaneos'].append(nuevo_escaneo)
 
                                     prev_scans = int(st.session_state.get("escaneos_realizados", 0))
@@ -2483,22 +2487,17 @@ with menu_dashboard:
                                         sync_email, "escaneos_realizados", prev_scans + 1
                                     )
 
-                                    try:
-                                        ins = supabase.table("escaneos").insert(nuevo_escaneo).execute()
-                                        if getattr(ins, "data", None):
-                                            nuevo_escaneo["id"] = ins.data[0].get("id")
-                                        print("¡Datos enviados a Supabase correctamente!")
-                                    except Exception as e:
-                                        print(f"Error al guardar en Supabase: {e}")
 
                                     nuevo_escaneo["resultados"] = resultados_auditoria
                                     st.session_state["escaneo_actual_id"] = _id_reporte_desde_fila(nuevo_escaneo)
                                     _sincronizar_derecho_pdf_en_sesion(nuevo_escaneo)
 
-                                    finish_scan(st.session_state, completed=True)
                                     st.rerun()
+                            except Exception as error:
+                                logging.getLogger("vulnscan.billing").warning("operation=scan_flow error_type=%s", type(error).__name__)
+                                st.error("No se pudo confirmar el escaneo. El crédito solo se consume al confirmar el informe guardado; si ya aparece un resultado, reintenta para confirmar su estado.")
                             finally:
-                                finish_scan(st.session_state)
+                                finish_scan(st.session_state, supabase)
         else:
             st.warning("⚠️ Escribe un dominio primero para poder iniciar el escaneo.")
 
