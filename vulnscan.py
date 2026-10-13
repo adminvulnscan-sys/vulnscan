@@ -43,6 +43,7 @@ from billing import (CheckoutIntentClosed, stripe_idempotency, effective_plan, s
                      begin_scan, finish_scan, ScanBusy, pending_scan_credit)
 from payment_urls import payment_return_url
 from scan_reservation import run_reserved_scan, store_scan
+from panel_diagnostics import log_panel_failure, section_loaded, feed_item
 from motores import _motor_basic_pasivo, _motor_pro_activo, _motor_enterprise_owasp
 
 # --- CONEXIÓN A SUPABASE ---
@@ -3216,19 +3217,19 @@ with menu_reportes:
 
                         reporte_desbloqueado = st.session_state.get("reporte_pdf_desbloqueado", None)
                         if plan_rep in ['Pro', 'Enterprise'] or tokens_pdf > 0 or _pdf_desbloqueado_servidor(reporte_id):
-                            import json
-                            resultados_rep = rep.get('resultados', [])
-                            if not resultados_rep:
-                                resultados_json = rep.get('resultados_json', '[]')
-                                try:
-                                    resultados_rep = json.loads(resultados_json) if isinstance(resultados_json, str) else resultados_json
-                                except Exception:
-                                    resultados_rep = []
+                            resultados_rep = _normalizar_lineas_resultado(
+                                rep.get("resultados") or rep.get("resultados_json")
+                            )
                             resultados_rep = [r.replace('\u2192', '->').replace('\u2014', '-').replace('\u2013', '-') for r in resultados_rep]
                             if not resultados_rep:
                                 resultados_rep = [f"✅ Dominio analizado: {dominio}", f"📅 Fecha: {fecha}", f"⚠️ Nivel de riesgo: {riesgo}"]
                             resultados_rep_limpios = [r.replace('\U0001f7e1', '').replace('\U0001f7e0', '').replace('\U0001f534', '').replace('\U0001f7e2', '').replace('\u26aa', '') if isinstance(r, str) else r for r in resultados_rep]
-                            pdf_bytes = crear_pdf(dominio, resultados_rep_limpios)
+                            try:
+                                pdf_bytes = crear_pdf(dominio, resultados_rep_limpios)
+                            except Exception as error:
+                                log_panel_failure("reports_pdf", error)
+                                st.warning("No se pudo preparar este informe. Los demás apartados siguen disponibles.")
+                                return
                             if _descargar_pdf_seguro(
                                 report_id=reporte_id,
                                 label="📄 Descargar Reporte PDF",
@@ -3257,6 +3258,8 @@ with menu_reportes:
                 for i, rep in enumerate(historial_filtrado):
                     pintar_reporte(rep, i, "todos")
                     st.markdown("---")
+
+section_loaded("reports")
 
 # ==========================================
 # PESTAÑA 4: AMENAZAS (Diccionario B2B y Live Feed)
@@ -3424,20 +3427,16 @@ with menu_amenazas:
     if datos_reales:
         lista_amenazas = []
         for cve in datos_reales:
-            cvss = float(cve.get('cvss', 0)) if cve.get('cvss') else 5.0
-            sev = "CRITICA" if cvss >= 8.0 else ("ALTA" if cvss >= 5.0 else "MEDIA")
-            desc = cve.get('summary', 'Sin descripción')[:150] + '...' 
-            
-            lista_amenazas.append({
-                "Identificador CVE": cve.get('id', 'N/A'),
-                "Severidad CVSS": f"{cvss} - {sev}",
-                "Descripción Técnica del Riesgo": desc
-            })
+            item = feed_item(cve)
+            if item is not None:
+                lista_amenazas.append(item)
             
         df_amenazas = pd.DataFrame(lista_amenazas)
         
         # Tabla mostrada para todos sin restricciones (y con el ancho correcto para que no salgan errores rojos)
         st.dataframe(df_amenazas, width='stretch', hide_index=True)
+section_loaded("threats")
+
 # ==========================================
 # PESTAÑA 5: CONFIGURACIÓN (API, Webhooks y Billing Real)
 # ==========================================
@@ -3725,3 +3724,5 @@ curl -X POST https://api.vulnscan.com/v1/scans \\
                 if st.button("🗑️ Cancelar Renovación"):
                     if _cambiar_renovacion(True):
                         st.rerun()
+
+section_loaded("settings")
