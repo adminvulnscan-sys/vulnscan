@@ -24,7 +24,7 @@ import requests
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from billing import *
-from panel_diagnostics import log_panel_failure, section_loaded, feed_item
+from panel_diagnostics import log_panel_failure, section_loaded, feed_item, measure_panel, cached_pdf
 from stripe_navigation import stripe_action
 import stripe_navigation
 if st.query_params.get("real_bridge") != "1":

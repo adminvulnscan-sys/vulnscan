@@ -230,7 +230,7 @@ def clear_account_state(state):
         "_billing_wait", "_billing_sync_status", "_billing_last_poll", "_billing_return_checkout",
         "_billing_notice_until",
         "_billing_open_checkout", "_billing_return_event",
-        "escaneo_en_curso", "_scan_credit_pending",
+        "escaneo_en_curso", "_scan_credit_pending", "_panel_pdf_cache",
     )
     for key in keys:
         state.pop(key, None)

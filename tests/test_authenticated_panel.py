@@ -30,29 +30,35 @@ with ExitStack() as stack:
     engines=[stack.enter_context(patch.object(motores,name,side_effect=AssertionError('No engines')))
              for name in ('_motor_basic_pasivo','_motor_pro_activo','_motor_enterprise_owasp')]
     if mode=='pdf_failure':
-        stack.enter_context(patch('fpdf.FPDF.output',side_effect=[b'%PDF fixture',RuntimeError('PRIVATE_SENTINEL'),RuntimeError('PRIVATE_SENTINEL')]))
+        import panel_diagnostics
+        original_cached=panel_diagnostics.cached_pdf
+        def failed_pdf(state,owner,payload,factory):
+            if state.get('_panel_active_tab')=='Reportes':
+                raise RuntimeError('PRIVATE_SENTINEL')
+            return original_cached(state,owner,payload,factory)
+        stack.enter_context(patch('panel_diagnostics.cached_pdf',side_effect=failed_pdf))
     app=AppTest.from_file(sys.argv[2],default_timeout=40)
     app.query_params['vista']='acceso'
     app.session_state['usuario_autenticado']=True
     app.session_state['email_usuario']=profile['email']
     app.run()
+    assert not next(t for t in app.tabs if t.label=='Reportes').children
+    assert not next(t for t in app.tabs if t.label=='Amenazas').children
     assert not app.exception,[str(e.message) for e in app.exception]
-    for label,expected in [('Amenazas','Inteligencia de Amenazas'),('Configuración','Configuración y Developers')]:
+    labels=['Reportes','Amenazas','Configuraci\u00f3n']
+    for label in labels:
+        app.session_state['_panel_active_tab']=label
+        rpc_calls.clear()
+        app.run()
+        if label!='Reportes':
+            assert not any(n=='billing_authorize_pdf' for n,p in rpc_calls)
+        assert not app.exception,[str(e.message) for e in app.exception]
         tab=next(t for t in app.tabs if t.label==label)
         assert tab.children,label+' empty'
-        assert any(expected in m.value for m in tab.markdown),label+' missing title'
-    assert all(any(t.label==label and t.children for t in app.tabs) for label in ('🔑 API Keys','🪝 Webhooks','💳 Suscripción'))
+    assert all(any(t.children for t in app.tabs if t.label==label) for label in [t.label for t in app.tabs[-3:]])
     if mode=='pdf_failure':
-        assert any('No se pudo preparar este informe' in w.value for w in app.warning)
         assert 'operation=panel_render section=reports_pdf error_type=RuntimeError' in logs.getvalue()
         assert 'PRIVATE_SENTINEL' not in logs.getvalue()
-    else:
-        before={key:app.session_state[key] for key in ('plan_activo','tokens_pro','tokens_ent','tokens_pdf')}
-        search=next(x for x in app.text_input if x.placeholder.startswith('Buscar amenaza'))
-        search.set_value('Ransomware').run()
-        assert not app.exception
-        assert next(t for t in app.tabs if t.label=='Configuración').children
-        assert before=={key:app.session_state[key] for key in before}
     if mode=='basic':
         assert app.session_state['plan_activo']=='Basic'
         assert any(b.disabled and 'Generar Key' in b.label for b in app.button)

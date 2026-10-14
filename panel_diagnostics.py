@@ -2,7 +2,7 @@
 import logging
 from pathlib import Path
 
-REVISION='panel-tabs-v1'
+REVISION='panel-performance-v2'
 logging.getLogger('vulnscan.panel').warning('operation=panel_module_loaded revision=%s',REVISION)
 
 
@@ -38,3 +38,39 @@ def log_panel_failure(section,error):
     logging.getLogger('vulnscan.panel').warning(
         'operation=panel_render section=%s error_type=%s file=%s function=%s line=%s revision=%s',
         section,type(error).__name__,filename,function,line,REVISION)
+
+
+from contextlib import contextmanager
+from time import perf_counter
+
+@contextmanager
+def measure_panel(operation):
+    start = perf_counter()
+    try:
+        yield
+    finally:
+        logging.getLogger('vulnscan.panel').warning(
+            'operation=panel_timing phase=%s elapsed_ms=%d revision=%s',
+            operation, round((perf_counter()-start)*1000), REVISION)
+
+
+def cached_pdf(state, owner, payload, factory):
+    """Private, bounded byte cache. Never caches authorization or credit balances."""
+    import hashlib
+    import json
+    key = hashlib.sha256(json.dumps(payload, ensure_ascii=False, default=str).encode()).hexdigest()
+    cache = state.get('_panel_pdf_cache')
+    if not isinstance(cache, dict) or cache.get('owner') != owner:
+        cache = {'owner': owner, 'items': {}}
+        state['_panel_pdf_cache'] = cache
+    items = cache['items']
+    if key not in items:
+        with measure_panel('pdf_generate'):
+            value = factory()
+        # A single unusually large report is served but not retained.
+        if len(value) > 8*1024*1024:
+            return value
+        while items and (len(items) >= 32 or sum(map(len,items.values()))+len(value)>8*1024*1024):
+            items.pop(next(iter(items)))
+        items[key] = value
+    return items[key]

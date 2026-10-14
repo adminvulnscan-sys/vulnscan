@@ -30,7 +30,9 @@ class PanelControlsTests(unittest.TestCase):
         self.assertIn("payment", extra_args[3])
 
     def test_render_and_language_do_not_create_checkout(self):
-        app=AppTest.from_file(str(PREVIEW),default_timeout=20).run()
+        app=AppTest.from_file(str(PREVIEW),default_timeout=20)
+        app.session_state["_panel_active_tab"]="Precios"
+        app.run()
         self.assertFalse(app.exception)
         for lang in ('en','es'):
             app.session_state['_vs_lang']=lang
@@ -41,14 +43,18 @@ class PanelControlsTests(unittest.TestCase):
         self.assertFalse(any(button.label in ('ES','EN') for button in app.button))
 
     def test_explicit_purchase_uses_real_checkout_controller(self):
-        app=AppTest.from_file(str(PREVIEW),default_timeout=20).run()
+        app=AppTest.from_file(str(PREVIEW),default_timeout=20)
+        app.session_state["_panel_active_tab"]="Precios"
+        app.run()
         button=next(b for b in app.button if b.label.strip()=='Comprar Escaneo Único (39€)')
         button.click().run()
         self.assertFalse(app.exception)
         self.assertEqual(app.session_state['preview_checkouts'],1)
 
     def test_standalone_pdf_credit_without_scan_is_explicit_purchase(self):
-        app=AppTest.from_file(str(PREVIEW),default_timeout=20).run()
+        app=AppTest.from_file(str(PREVIEW),default_timeout=20)
+        app.session_state["_panel_active_tab"]="Precios"
+        app.run()
         app.checkbox[0].uncheck().run()
         self.assertFalse(app.exception)
         button=next(b for b in app.button if b.key=='purchase_pdf_credit_standalone')
@@ -63,7 +69,9 @@ class PanelControlsTests(unittest.TestCase):
         self.assertEqual(app.session_state['preview_checkouts'],1)
 
     def test_missing_schema_safe_error_and_secret_free_log(self):
-        app=AppTest.from_file(str(PREVIEW),default_timeout=20).run()
+        app=AppTest.from_file(str(PREVIEW),default_timeout=20)
+        app.session_state["_panel_active_tab"]="Precios"
+        app.run()
         app.checkbox(key='preview_schema_missing').check().run()
         button=next(b for b in app.button if b.label.strip()=='Comprar Escaneo Único (39€)')
         with self.assertLogs('vulnscan.billing',level='WARNING') as captured:
