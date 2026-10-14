@@ -7,6 +7,9 @@ public_entry = importlib.reload(landing).public_entry
 
 public_entry(st)
 
+from time import perf_counter as _panel_clock
+_panel_entry_started = _panel_clock()
+
 import os
 import base64
 import json
@@ -45,10 +48,11 @@ from payment_urls import payment_return_url
 from scan_reservation import run_reserved_scan, store_scan
 import panel_diagnostics as _panel_diagnostics_module
 # Cloud can retain the previous helper module during a hot code update.
-if (getattr(_panel_diagnostics_module, "REVISION", None) != "panel-eager-v3"
+if (getattr(_panel_diagnostics_module, "REVISION", None) != "panel-trace-v4"
         or not all(hasattr(_panel_diagnostics_module, name) for name in ("measure_panel", "cached_pdf"))):
     importlib.reload(_panel_diagnostics_module)
-from panel_diagnostics import log_panel_failure, section_loaded, feed_item, measure_panel, cached_pdf
+from panel_diagnostics import log_panel_failure, section_loaded, feed_item, measure_panel, cached_pdf, begin_panel_trace, finish_panel_trace, panel_count, panel_execute
+begin_panel_trace(_panel_entry_started)
 from motores import _motor_basic_pasivo, _motor_pro_activo, _motor_enterprise_owasp
 
 # --- CONEXIÓN A SUPABASE ---
@@ -784,7 +788,7 @@ def _confirmar_compra_pdf_tras_stripe(email):
 
 def _pdf_desbloqueado_servidor(report_id):
     try:
-        result = supabase.rpc("billing_authorize_pdf", {"p_report": str(report_id), "p_consume": False}).execute().data
+        result = panel_execute(supabase.rpc("billing_authorize_pdf", {"p_report": str(report_id), "p_consume": False}), 'supabase.billing_authorize_pdf').data
         return bool(result and result.get("authorized"))
     except Exception:
         return False
@@ -793,12 +797,12 @@ def _pdf_desbloqueado_servidor(report_id):
 def _descargar_pdf_seguro(*args, report_id=None, **kwargs):
     report = str(report_id or st.session_state.get("escaneo_actual_id", ""))
     try:
-        result = supabase.rpc("billing_authorize_pdf", {"p_report": report, "p_consume": False}).execute().data
+        result = panel_execute(supabase.rpc("billing_authorize_pdf", {"p_report": report, "p_consume": False}), 'supabase.billing_authorize_pdf').data
         if not result or not result.get("authorized"):
             widget_key = "pdf_autorizar_" + str(kwargs.get("key") or report)
             if not st.button("Desbloquear PDF (1 credito)", key=widget_key, use_container_width=True):
                 return False
-            result = supabase.rpc("billing_authorize_pdf", {"p_report": report, "p_consume": True}).execute().data
+            result = panel_execute(supabase.rpc("billing_authorize_pdf", {"p_report": report, "p_consume": True}), 'supabase.billing_authorize_pdf').data
             if not result or not result.get("authorized"):
                 raise ValueError("No autorizado")
         if result.get("remaining") is not None:
@@ -829,6 +833,7 @@ def _cambiar_renovacion(cancelar):
 
 
 
+@measure_panel("last_scan_restore")
 def restaurar_ultimo_escaneo_supabase(email):
     """Recupera el último escaneo y lo deja listo para pintar el Dashboard igual que un escaneo nuevo."""
     email_clean = (email or "").strip()
@@ -836,12 +841,11 @@ def restaurar_ultimo_escaneo_supabase(email):
         return False
     try:
         ultimo = (
-            supabase.table("escaneos")
+            panel_execute(supabase.table("escaneos")
             .select("*")
             .eq("email_cliente", email_clean)
             .order("id", desc=True)
-            .limit(1)
-            .execute()
+            .limit(1), 'supabase.escaneos')
         )
         if not ultimo.data:
             print(f"[restaurar escaneo] Sin filas para {email_clean!r}")
@@ -991,7 +995,7 @@ def _provision_usuario_supabase(email):
     ultimo_error = None
     for fila in intentos:
         try:
-            supabase.table("usuarios").insert(fila).execute()
+            panel_execute(supabase.table("usuarios").insert(fila), 'supabase.usuarios')
             return True
         except Exception as e:
             ultimo_error = e
@@ -1059,23 +1063,24 @@ def _aplicar_fila_usuario_a_sesion(datos):
     st.session_state["scheduler_freq_pro"] = int(datos.get("scheduler_freq_pro") or 15)
     st.session_state["scheduler_freq_enterprise"] = int(datos.get("scheduler_freq_enterprise") or 7)
     try:
-        verificados = supabase.table("activos_verificados").select("dominio").eq("email_cliente", datos.get("email", "")).execute()
+        verificados = panel_execute(supabase.table("activos_verificados").select("dominio").eq("email_cliente", datos.get("email", "")), 'supabase.activos_verificados')
         st.session_state["dominios_verificados"] = [r["dominio"] for r in verificados.data]
         print(f"[DEBUG] dominios cargados: {st.session_state['dominios_verificados']}")
     except Exception:
         st.session_state["dominios_verificados"] = []
         print(f"[DEBUG dominios_verificados] Error: {Exception}")
 
+@measure_panel("account_profile")
 def cargar_perfil_usuario(email):
     # Never show an old snapshot if the current account cannot be loaded.
     st.session_state.pop("_credit_row", None)
     if not email:
         return
     try:
-        respuesta = supabase.table("usuarios").select("*").eq("email", email).execute()
+        respuesta = panel_execute(supabase.table("usuarios").select("*").eq("email", email), 'supabase.usuarios')
         if not respuesta.data:
             _provision_usuario_supabase(email)
-            respuesta = supabase.table("usuarios").select("*").eq("email", email).execute()
+            respuesta = panel_execute(supabase.table("usuarios").select("*").eq("email", email), 'supabase.usuarios')
 
         if respuesta.data:
             _aplicar_fila_usuario_a_sesion(respuesta.data[0])
@@ -1099,11 +1104,10 @@ def actualizar_usuario_supabase(email, campo, valor, escribir_en_sesion=True):
     email_clean = (email or "").strip()
     try:
         res = (
-            supabase.table("usuarios")
+            panel_execute(supabase.table("usuarios")
             .update({campo: valor})
             .eq("email", email_clean)
-            .select()
-            .execute()
+            .select(), 'supabase.usuarios')
         )
         rows = getattr(res, "data", None) or []
         if len(rows) == 0:
@@ -2016,9 +2020,10 @@ if st.session_state.get('usuario_autenticado'):
             billing_start_wait(st.session_state, st.session_state.get('email_usuario'), checkout)
         except ValueError:
             st.warning("No se pudo comprobar el retorno del pago. No repitas la compra.")
-    billing_monitor(st, supabase)
+    with measure_panel("billing_monitor_initial"):
+        billing_monitor(st, supabase)
 
-with st.sidebar:
+with st.sidebar, measure_panel("sidebar"):
     if st.button("Cerrar Sesión"):
         try:
             # Desconecta de la nube y destruye el token de seguridad
@@ -2110,34 +2115,35 @@ with st.sidebar:
             </p>
         </div>
     """, unsafe_allow_html=True)
+with measure_panel("header"):
 
-# --- CABECERA ---
-carpeta_actual = os.path.dirname(os.path.abspath(__file__))
-ruta_final = os.path.join(carpeta_actual, "assets", "vulnscan-logo-clean.png")
+    # --- CABECERA ---
+    carpeta_actual = os.path.dirname(os.path.abspath(__file__))
+    ruta_final = os.path.join(carpeta_actual, "assets", "vulnscan-logo-clean.png")
 
-logo_b64 = None
-if os.path.isfile(ruta_final):
-    with open(ruta_final, "rb") as f:
-        logo_b64 = base64.b64encode(f.read()).decode()
+    logo_b64 = None
+    if os.path.isfile(ruta_final):
+        with open(ruta_final, "rb") as f:
+            logo_b64 = base64.b64encode(f.read()).decode()
 
-if logo_b64:
-    st.markdown(f"""
-        <div style="display: flex; align-items: center; margin-bottom: 20px; position: relative; left: -100px;">
-            <img src="data:image/png;base64,{logo_b64}" style="width: 300px; margin-right: -40px;">
-            <div>
-                <h1 style="color: #ffffff; margin: 0; font-family: 'Segoe UI', sans-serif; font-size: 2.5rem; line-height: 1.1;">VulnScan</h1>
-                <p style="color: #00FFCC; margin: 5px 0 0 0; font-size: 1.1rem; font-weight: bold;">Auditoría Continua de Seguridad</p>
+    if logo_b64:
+        st.markdown(f"""
+            <div style="display: flex; align-items: center; margin-bottom: 20px; position: relative; left: -100px;">
+                <img src="data:image/png;base64,{logo_b64}" style="width: 300px; margin-right: -40px;">
+                <div>
+                    <h1 style="color: #ffffff; margin: 0; font-family: 'Segoe UI', sans-serif; font-size: 2.5rem; line-height: 1.1;">VulnScan</h1>
+                    <p style="color: #00FFCC; margin: 5px 0 0 0; font-size: 1.1rem; font-weight: bold;">Auditoría Continua de Seguridad</p>
+                </div>
             </div>
-        </div>
-    """, unsafe_allow_html=True)
-else:
-    st.error("No se ha encontrado el logo.")
+        """, unsafe_allow_html=True)
+    else:
+        st.error("No se ha encontrado el logo.")
 
-st.markdown("---")
+    st.markdown("---")
 
-# --- RESTO DE LA PÁGINA ---
+    # --- RESTO DE LA PÁGINA ---
 
-# 1. CREAMOS EL MENÚ DE NAVEGACIÓN SUPERIOR 
+    # 1. CREAMOS EL MENÚ DE NAVEGACIÓN SUPERIOR
 menu_dashboard, menu_activos, menu_escaneos, menu_reportes, menu_amenazas, menu_config = st.tabs([
     "Dashboard", "Mis Activos ", "Precios", "Reportes", "Amenazas", "Configuración"
 ], on_change="ignore")
@@ -2145,7 +2151,7 @@ menu_dashboard, menu_activos, menu_escaneos, menu_reportes, menu_amenazas, menu_
 # ==========================================
 # PESTAÑA NUEVA: MIS ACTIVOS (VERIFICACIÓN)
 # ==========================================
-with menu_activos:
+with menu_activos, measure_panel("assets"):
     st.markdown("""
         <style>
             .assets-hero {
@@ -2232,7 +2238,7 @@ with menu_activos:
 # ==========================================
 # PESTAÑA 1: DASHBOARD (Escáner Principal)
 # ==========================================
-with menu_dashboard:
+with menu_dashboard, measure_panel("dashboard"):
     # INICIALIZACIÓN DE LA BILLETERA DE TOKENS
     if 'tokens_pro' not in st.session_state:
         st.session_state['tokens_pro'] = 0
@@ -2846,7 +2852,7 @@ with menu_dashboard:
 # ==========================================
 # PESTAÑA 2: ESCANEOS (Tipos y Tarífas + Historial)
 # ==========================================
-with menu_escaneos:
+with menu_escaneos, measure_panel("prices"):
     # --- CAPA VISUAL PREMIUM (SIN CAMBIAR LÓGICA) ---
     st.markdown("""
     <style>
@@ -3166,8 +3172,10 @@ with menu_reportes, measure_panel("reports"):
     email_usuario = st.session_state.get('email_usuario', '')
     try:
         with measure_panel("history_read"):
-            respuesta = supabase.table("escaneos").select("*").eq("email_cliente", email_usuario).execute()
+            respuesta = panel_execute(supabase.table("escaneos").select("*").eq("email_cliente", email_usuario), 'supabase.escaneos')
         historial_real = list(reversed(respuesta.data))
+        panel_count("history_reports", len(historial_real))
+        panel_count("history_structured_reports", sum(isinstance(r.get("resultados_json"), (list, dict)) for r in historial_real))
     except Exception as e:
         historial_real = []
 
@@ -3229,13 +3237,14 @@ with menu_reportes, measure_panel("reports"):
 
                         reporte_desbloqueado = st.session_state.get("reporte_pdf_desbloqueado", None)
                         if plan_rep in ['Pro', 'Enterprise'] or tokens_pdf > 0 or _pdf_desbloqueado_servidor(reporte_id):
-                            resultados_rep = _normalizar_lineas_resultado(
-                                rep.get("resultados") or rep.get("resultados_json")
-                            )
-                            resultados_rep = [r.replace('\u2192', '->').replace('\u2014', '-').replace('\u2013', '-') for r in resultados_rep]
-                            if not resultados_rep:
-                                resultados_rep = [f"✅ Dominio analizado: {dominio}", f"📅 Fecha: {fecha}", f"⚠️ Nivel de riesgo: {riesgo}"]
-                            resultados_rep_limpios = [r.replace('\U0001f7e1', '').replace('\U0001f7e0', '').replace('\U0001f534', '').replace('\U0001f7e2', '').replace('\u26aa', '') if isinstance(r, str) else r for r in resultados_rep]
+                            with measure_panel("report_normalize"):
+                                resultados_rep = _normalizar_lineas_resultado(
+                                    rep.get("resultados") or rep.get("resultados_json")
+                                )
+                                resultados_rep = [r.replace('\u2192', '->').replace('\u2014', '-').replace('\u2013', '-') for r in resultados_rep]
+                                if not resultados_rep:
+                                    resultados_rep = [f"✅ Dominio analizado: {dominio}", f"📅 Fecha: {fecha}", f"⚠️ Nivel de riesgo: {riesgo}"]
+                                resultados_rep_limpios = [r.replace('\U0001f7e1', '').replace('\U0001f7e0', '').replace('\U0001f534', '').replace('\U0001f7e2', '').replace('\u26aa', '') if isinstance(r, str) else r for r in resultados_rep]
                             try:
                                 pdf_bytes = crear_pdf(dominio, resultados_rep_limpios)
                             except Exception as error:
@@ -3422,7 +3431,8 @@ with menu_amenazas, measure_panel("threats"):
             with measure_panel("threat_feed_read"):
                 respuesta = requests.get(url, headers=headers, timeout=(3, 8))
             if respuesta.status_code == 200:
-                return respuesta.json()[:6]
+                with measure_panel("threat_feed_decode"):
+                    return respuesta.json()[:6]
         except:
             pass
         
@@ -3739,3 +3749,4 @@ curl -X POST https://api.vulnscan.com/v1/scans \\
                         st.rerun()
 
 section_loaded("settings")
+finish_panel_trace()

@@ -1,5 +1,6 @@
 import ast
 from pathlib import Path
+from panel_diagnostics import panel_execute, measure_panel
 from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock
@@ -34,7 +35,7 @@ class CreditFlowTests(TestCase):
         db.rpc.return_value.execute.side_effect = [SimpleNamespace(data=r) for r in response]
         ui = SimpleNamespace(session_state=state, button=Mock(return_value=clicked),
                              download_button=Mock(return_value=True), warning=Mock())
-        namespace = {"st": ui, "supabase": db}
+        namespace = {"st": ui, "supabase": db, "panel_execute": panel_execute, "measure_panel": measure_panel}
         exec(compile(ast.Module(body=[fn], type_ignores=[]), filename, "exec"), namespace)
         return namespace["_descargar_pdf_seguro"], ui, db
 

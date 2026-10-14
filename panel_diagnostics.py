@@ -2,7 +2,7 @@
 import logging
 from pathlib import Path
 
-REVISION='panel-eager-v3'
+REVISION='panel-trace-v4'
 logging.getLogger('vulnscan.panel').warning('operation=panel_module_loaded revision=%s',REVISION)
 
 
@@ -42,13 +42,72 @@ def log_panel_failure(section,error):
 
 from contextlib import contextmanager
 from time import perf_counter
+from contextvars import ContextVar
+from uuid import uuid4
+import json
+
+_trace = ContextVar('panel_trace', default=None)
+
+
+def begin_panel_trace(start=None):
+    trace = {'run': uuid4().hex[:12], 'start': perf_counter() if start is None else start,
+             'phases': {}, 'counts': {}}
+    if start is not None:
+        elapsed = round((perf_counter()-start)*1000)
+        trace['phases']['imports'] = {'calls': 1, 'ms': elapsed, 'max_ms': elapsed,
+                                      'start_ms': 0, 'end_ms': elapsed}
+    _trace.set(trace)
+    return trace
+
+
+def panel_count(name, amount):
+    trace = _trace.get()
+    if trace is not None:
+        trace['counts'][name] = int(amount)
+
+
+def finish_panel_trace():
+    trace = _trace.get()
+    if trace is None:
+        return
+    payload = {'revision': REVISION, 'run': trace['run'],
+               'total_ms': round((perf_counter()-trace['start'])*1000),
+               'nested_timings': True, 'counts': trace['counts'], 'phases': trace['phases']}
+    logging.getLogger('vulnscan.panel').warning(
+        'operation=panel_profile_summary %s', json.dumps(payload, separators=(',', ':')))
+    logger = logging.getLogger('vulnscan.panel')
+    for phase, stats in sorted(trace['phases'].items(), key=lambda item: item[1]['start_ms']):
+        logger.warning('operation=panel_profile_timing run=%s phase=%s calls=%d elapsed_ms=%d max_ms=%d from_ms=%d to_ms=%d',
+                       trace['run'], phase, stats['calls'], stats['ms'], stats['max_ms'],
+                       stats['start_ms'], stats['end_ms'])
+    logger.warning('operation=panel_profile_timing run=%s phase=TOTAL elapsed_ms=%d reports=%d structured=%d nested=true',
+                   trace['run'], payload['total_ms'], trace['counts'].get('history_reports', 0),
+                   trace['counts'].get('history_structured_reports', 0))
+    _trace.set(None)
+    return payload
+
+
+def panel_execute(query, phase):
+    """Measure execution/response decoding; never inspect query arguments or responses."""
+    with measure_panel(phase):
+        return query.execute()
 
 @contextmanager
 def measure_panel(operation):
     start = perf_counter()
+    trace = _trace.get()
     try:
         yield
     finally:
+        elapsed = round((perf_counter()-start)*1000)
+        if trace is not None:
+            stats = trace['phases'].setdefault(operation, {
+                'calls': 0, 'ms': 0, 'max_ms': 0,
+                'start_ms': round((start-trace['start'])*1000), 'end_ms': 0})
+            stats['calls'] += 1
+            stats['ms'] += elapsed
+            stats['max_ms'] = max(stats['max_ms'], elapsed)
+            stats['end_ms'] = round((perf_counter()-trace['start'])*1000)
         logging.getLogger('vulnscan.panel').warning(
             'operation=panel_timing phase=%s elapsed_ms=%d revision=%s',
             operation, round((perf_counter()-start)*1000), REVISION)

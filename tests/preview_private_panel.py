@@ -24,7 +24,7 @@ import requests
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from billing import *
-from panel_diagnostics import log_panel_failure, section_loaded, feed_item, measure_panel, cached_pdf
+from panel_diagnostics import log_panel_failure, section_loaded, feed_item, measure_panel, cached_pdf, begin_panel_trace, finish_panel_trace, panel_count, panel_execute
 from stripe_navigation import stripe_action
 import stripe_navigation
 if st.query_params.get("real_bridge") != "1":
@@ -107,7 +107,7 @@ for node in tree.body:
     if isinstance(node,ast.Expr) and isinstance(node.value,ast.Call) and ast.unparse(node.value.func)=="_VS_TRANSLATIONS.update":
         exec(compile(ast.Module(body=[node],type_ignores=[]),"translations","exec"),namespace)
 namespace["_aplicar_fila_usuario_a_sesion"](profile)
-private_source = source[source.index('with st.sidebar:\n    if st.button("Cerrar Sesión"):'):]
+private_source = source[source.index('with st.sidebar, measure_panel("sidebar"):'): ]
 picker_source = source[source.index('# The private picker'):source.index('# Traducimos únicamente métodos')]
 st.session_state.setdefault("_vs_lang","es")
 with ExitStack() as patches:
