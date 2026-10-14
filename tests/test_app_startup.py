@@ -24,6 +24,14 @@ if stale:
     sys.modules['billing'] = old
     original_exception = old.CheckoutIntentClosed
 
+if sys.argv[1] == 'stale_panel':
+    source = subprocess.check_output(['git', 'show', 'e457040:panel_diagnostics.py']).decode('utf-8')
+    old_panel = types.ModuleType('panel_diagnostics')
+    old_panel.__file__ = str(Path('panel_diagnostics.py').resolve())
+    exec(compile(source, old_panel.__file__, 'exec'), old_panel.__dict__)
+    assert not hasattr(old_panel, 'cached_pdf')
+    sys.modules['panel_diagnostics'] = old_panel
+
 db = Mock()
 db.table.side_effect = AssertionError('Unexpected database operation')
 db.rpc.side_effect = AssertionError('Unexpected database operation')
@@ -75,3 +83,9 @@ class AppStartupTests(unittest.TestCase):
 
     def test_vulnscan_with_pre_update_billing_cached(self):
         self.run_startup('stale', 'vulnscan.py')
+
+    def test_app_with_previous_panel_helpers_cached(self):
+        self.run_startup('stale_panel', 'app.py')
+
+    def test_secondary_entry_with_previous_panel_helpers_cached(self):
+        self.run_startup('stale_panel', 'vulnscan.py')

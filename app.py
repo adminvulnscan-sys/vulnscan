@@ -43,6 +43,10 @@ from billing import (CheckoutIntentClosed, stripe_idempotency, effective_plan, s
                      begin_scan, finish_scan, ScanBusy, pending_scan_credit)
 from payment_urls import payment_return_url
 from scan_reservation import run_reserved_scan, store_scan
+import panel_diagnostics as _panel_diagnostics_module
+# Cloud can retain the previous helper module during a hot code update.
+if not all(hasattr(_panel_diagnostics_module, name) for name in ("measure_panel", "cached_pdf")):
+    importlib.reload(_panel_diagnostics_module)
 from panel_diagnostics import log_panel_failure, section_loaded, feed_item, measure_panel, cached_pdf
 from motores import _motor_basic_pasivo, _motor_pro_activo, _motor_enterprise_owasp
 
