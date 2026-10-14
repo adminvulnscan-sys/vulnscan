@@ -32,8 +32,10 @@ with ExitStack() as stack:
     if mode=='pdf_failure':
         import panel_diagnostics
         original_cached=panel_diagnostics.cached_pdf
+        calls=[]
         def failed_pdf(state,owner,payload,factory):
-            if state.get('_panel_active_tab')=='Reportes':
+            calls.append(True)
+            if len(calls)>1:
                 raise RuntimeError('PRIVATE_SENTINEL')
             return original_cached(state,owner,payload,factory)
         stack.enter_context(patch('panel_diagnostics.cached_pdf',side_effect=failed_pdf))
@@ -42,20 +44,20 @@ with ExitStack() as stack:
     app.session_state['usuario_autenticado']=True
     app.session_state['email_usuario']=profile['email']
     app.run()
-    assert not next(t for t in app.tabs if t.label=='Reportes').children
-    assert not next(t for t in app.tabs if t.label=='Amenazas').children
     assert not app.exception,[str(e.message) for e in app.exception]
+    # All sections and both history lists must exist on the first render.
     labels=['Reportes','Amenazas','Configuraci\u00f3n']
     for label in labels:
-        app.session_state['_panel_active_tab']=label
-        rpc_calls.clear()
-        app.run()
-        if label!='Reportes':
-            assert not any(n=='billing_authorize_pdf' for n,p in rpc_calls)
-        assert not app.exception,[str(e.message) for e in app.exception]
         tab=next(t for t in app.tabs if t.label==label)
-        assert tab.children,label+' empty'
-    assert all(any(t.children for t in app.tabs if t.label==label) for label in [t.label for t in app.tabs[-3:]])
+        assert tab.children,label+' empty at initial load'
+    if mode not in ('empty','feed','basic'):
+        assert all(t.children for t in app.tabs if 'Historial Completo' in t.label or 'Resultados Filtrados' in t.label)
+    if mode!='pdf_failure':
+        before={key:app.session_state[key] for key in ('plan_activo','tokens_pro','tokens_ent','tokens_pdf')}
+        search=next(x for x in app.text_input if x.placeholder.startswith('Buscar amenaza'))
+        search.set_value('Ransomware').run()
+        assert not app.exception
+        assert before=={key:app.session_state[key] for key in before}
     if mode=='pdf_failure':
         assert 'operation=panel_render section=reports_pdf error_type=RuntimeError' in logs.getvalue()
         assert 'PRIVATE_SENTINEL' not in logs.getvalue()

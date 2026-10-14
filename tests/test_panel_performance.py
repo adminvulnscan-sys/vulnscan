@@ -35,3 +35,23 @@ class PrivatePdfCacheTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 cached_pdf(state, 'a', ['broken'], make)
         self.assertEqual(make.call_count, 2)
+
+
+class EagerNavigationTests(unittest.TestCase):
+    def test_main_and_history_tabs_are_client_only_and_have_no_lazy_gates(self):
+        import ast
+        from pathlib import Path
+        for filename in ('app.py', 'vulnscan.py'):
+            tree = ast.parse(Path(filename).read_text(encoding='utf-8'))
+            for name in ('menu_dashboard', 'sub_tab_recientes'):
+                node = next(n for n in ast.walk(tree) if isinstance(n, ast.Assign)
+                            and isinstance(n.targets[0], ast.Tuple)
+                            and isinstance(n.targets[0].elts[0], ast.Name)
+                            and n.targets[0].elts[0].id == name)
+                options = {k.arg: k.value for k in node.value.keywords}
+                self.assertEqual(ast.literal_eval(options['on_change']), 'ignore')
+                self.assertNotIn('key', options)
+            lazy = [n for n in ast.walk(tree) if isinstance(n, ast.Attribute)
+                    and n.attr == 'open' and isinstance(n.value, ast.Name)
+                    and (n.value.id.startswith('menu_') or n.value.id.startswith('sub_tab_'))]
+            self.assertFalse(lazy)

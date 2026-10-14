@@ -31,7 +31,6 @@ class PanelControlsTests(unittest.TestCase):
 
     def test_render_and_language_do_not_create_checkout(self):
         app=AppTest.from_file(str(PREVIEW),default_timeout=20)
-        app.session_state["_panel_active_tab"]="Precios"
         app.run()
         self.assertFalse(app.exception)
         for lang in ('en','es'):
@@ -44,7 +43,6 @@ class PanelControlsTests(unittest.TestCase):
 
     def test_explicit_purchase_uses_real_checkout_controller(self):
         app=AppTest.from_file(str(PREVIEW),default_timeout=20)
-        app.session_state["_panel_active_tab"]="Precios"
         app.run()
         button=next(b for b in app.button if b.label.strip()=='Comprar Escaneo Único (39€)')
         button.click().run()
@@ -53,7 +51,6 @@ class PanelControlsTests(unittest.TestCase):
 
     def test_standalone_pdf_credit_without_scan_is_explicit_purchase(self):
         app=AppTest.from_file(str(PREVIEW),default_timeout=20)
-        app.session_state["_panel_active_tab"]="Precios"
         app.run()
         app.checkbox[0].uncheck().run()
         self.assertFalse(app.exception)
@@ -70,7 +67,6 @@ class PanelControlsTests(unittest.TestCase):
 
     def test_missing_schema_safe_error_and_secret_free_log(self):
         app=AppTest.from_file(str(PREVIEW),default_timeout=20)
-        app.session_state["_panel_active_tab"]="Precios"
         app.run()
         app.checkbox(key='preview_schema_missing').check().run()
         button=next(b for b in app.button if b.label.strip()=='Comprar Escaneo Único (39€)')

@@ -45,7 +45,8 @@ from payment_urls import payment_return_url
 from scan_reservation import run_reserved_scan, store_scan
 import panel_diagnostics as _panel_diagnostics_module
 # Cloud can retain the previous helper module during a hot code update.
-if not all(hasattr(_panel_diagnostics_module, name) for name in ("measure_panel", "cached_pdf")):
+if (getattr(_panel_diagnostics_module, "REVISION", None) != "panel-eager-v3"
+        or not all(hasattr(_panel_diagnostics_module, name) for name in ("measure_panel", "cached_pdf"))):
     importlib.reload(_panel_diagnostics_module)
 from panel_diagnostics import log_panel_failure, section_loaded, feed_item, measure_panel, cached_pdf
 from motores import _motor_basic_pasivo, _motor_pro_activo, _motor_enterprise_owasp
@@ -2139,729 +2140,944 @@ st.markdown("---")
 # 1. CREAMOS EL MENÚ DE NAVEGACIÓN SUPERIOR 
 menu_dashboard, menu_activos, menu_escaneos, menu_reportes, menu_amenazas, menu_config = st.tabs([
     "Dashboard", "Mis Activos ", "Precios", "Reportes", "Amenazas", "Configuración"
-], key="_panel_active_tab", on_change="rerun")
+], on_change="ignore")
 
 # ==========================================
 # PESTAÑA NUEVA: MIS ACTIVOS (VERIFICACIÓN)
 # ==========================================
-if menu_activos.open:
-    with menu_activos:
-        st.markdown("""
-            <style>
-                .assets-hero {
-                    background: linear-gradient(180deg, #161b22 0%, #121820 100%);
-                    border: 1px solid #30363d;
-                    border-radius: 14px;
-                    padding: 22px 22px 18px 22px;
-                    margin-bottom: 14px;
-                }
-                .assets-title {
-                    margin: 0;
-                    color: #f0f6fc;
-                    font-size: 1.5rem;
-                    font-weight: 700;
-                    letter-spacing: 0.2px;
-                }
-                .assets-subtitle {
-                    margin: 8px 0 0 0;
-                    color: #9aa4af;
-                    font-size: 0.98rem;
-                    line-height: 1.6;
-                }
-                .assets-card {
-                    background: #161b22;
-                    border: 1px solid #30363d;
-                    border-radius: 12px;
-                    padding: 16px 16px 10px 16px;
-                    margin-bottom: 10px;
-                }
-                .asset-domain-chip {
-                    background: rgba(0, 255, 204, 0.08);
-                    border: 1px solid rgba(0, 255, 204, 0.35);
-                    color: #d2fff3;
-                    border-radius: 10px;
-                    padding: 10px 12px;
-                    margin-bottom: 8px;
-                    font-size: 0.95rem;
-                    font-weight: 600;
-                    line-height: 1.4;
-                }
-            </style>
-        """, unsafe_allow_html=True)
+with menu_activos:
+    st.markdown("""
+        <style>
+            .assets-hero {
+                background: linear-gradient(180deg, #161b22 0%, #121820 100%);
+                border: 1px solid #30363d;
+                border-radius: 14px;
+                padding: 22px 22px 18px 22px;
+                margin-bottom: 14px;
+            }
+            .assets-title {
+                margin: 0;
+                color: #f0f6fc;
+                font-size: 1.5rem;
+                font-weight: 700;
+                letter-spacing: 0.2px;
+            }
+            .assets-subtitle {
+                margin: 8px 0 0 0;
+                color: #9aa4af;
+                font-size: 0.98rem;
+                line-height: 1.6;
+            }
+            .assets-card {
+                background: #161b22;
+                border: 1px solid #30363d;
+                border-radius: 12px;
+                padding: 16px 16px 10px 16px;
+                margin-bottom: 10px;
+            }
+            .asset-domain-chip {
+                background: rgba(0, 255, 204, 0.08);
+                border: 1px solid rgba(0, 255, 204, 0.35);
+                color: #d2fff3;
+                border-radius: 10px;
+                padding: 10px 12px;
+                margin-bottom: 8px;
+                font-size: 0.95rem;
+                font-weight: 600;
+                line-height: 1.4;
+            }
+        </style>
+    """, unsafe_allow_html=True)
 
-        st.markdown("""
-            <div class="assets-hero">
-                <h2 class="assets-title">Gestión de Activos y Compliance</h2>
-                <p class="assets-subtitle">Por imperativo legal, debes demostrar que administras un dominio antes de realizar auditorías intrusivas.</p>
-            </div>
-        """, unsafe_allow_html=True)
-    
-        col_act1, col_act2 = st.columns([2, 1])
-    
-        with col_act1:
-            st.markdown("<div class='assets-card'><h3 style='margin:0; color:#f0f6fc; font-size:1.12rem;'>Añadir nueva propiedad</h3></div>", unsafe_allow_html=True)
-            nuevo_dominio = st.text_input("URL del dominio (ej: miproyecto.com)", placeholder="miproyecto.com")
-        
-            if nuevo_dominio:
-                dominio_limpio = nuevo_dominio.replace("https://", "").replace("http://", "").split("/")[0]
-                token = generar_token(st.session_state['email_usuario'], dominio_limpio)
-            
-                st.info("**Instrucciones de verificación:**")
-                st.code(f"1. Crea un archivo de texto llamado: vulnscan-auth.txt\n2. Pega este código dentro: {token}\n3. Súbelo a la carpeta raíz de {dominio_limpio}", language="text")
-            
-                if st.button("Verificar Propiedad ahora", type="primary"):
-                    with st.spinner("Conectando con el servidor del cliente..."):
-                        time.sleep(1.5) # Efecto dramático de búsqueda
-                        if comprobar_archivo_servidor(dominio_limpio, token):
-                            if dominio_limpio not in st.session_state['dominios_verificados']:
-                                st.session_state['dominios_verificados'].append(dominio_limpio)
-                            st.success(f"✅ ¡Éxito! El dominio {dominio_limpio} ha sido verificado legalmente.")
-                            time.sleep(2)
-                            st.rerun()
-                        else:
-                            st.error(f"❌ No se encontró el archivo en http://{dominio_limpio}/vulnscan-auth.txt o el código es incorrecto.")
-                        
-        with col_act2:
-            st.markdown("<div class='assets-card'><h3 style='margin:0; color:#f0f6fc; font-size:1.12rem;'> Propiedades Verificadas</h3></div>", unsafe_allow_html=True)
-            if len(st.session_state['dominios_verificados']) == 0:
-                st.warning("Aún no tienes ningún dominio verificado.")
-            else:
-                for dom in st.session_state['dominios_verificados']:
-                    st.markdown(f"<div class='asset-domain-chip'>🟢 {dom}</div>", unsafe_allow_html=True)
+    st.markdown("""
+        <div class="assets-hero">
+            <h2 class="assets-title">Gestión de Activos y Compliance</h2>
+            <p class="assets-subtitle">Por imperativo legal, debes demostrar que administras un dominio antes de realizar auditorías intrusivas.</p>
+        </div>
+    """, unsafe_allow_html=True)
+
+    col_act1, col_act2 = st.columns([2, 1])
+
+    with col_act1:
+        st.markdown("<div class='assets-card'><h3 style='margin:0; color:#f0f6fc; font-size:1.12rem;'>Añadir nueva propiedad</h3></div>", unsafe_allow_html=True)
+        nuevo_dominio = st.text_input("URL del dominio (ej: miproyecto.com)", placeholder="miproyecto.com")
+
+        if nuevo_dominio:
+            dominio_limpio = nuevo_dominio.replace("https://", "").replace("http://", "").split("/")[0]
+            token = generar_token(st.session_state['email_usuario'], dominio_limpio)
+
+            st.info("**Instrucciones de verificación:**")
+            st.code(f"1. Crea un archivo de texto llamado: vulnscan-auth.txt\n2. Pega este código dentro: {token}\n3. Súbelo a la carpeta raíz de {dominio_limpio}", language="text")
+
+            if st.button("Verificar Propiedad ahora", type="primary"):
+                with st.spinner("Conectando con el servidor del cliente..."):
+                    time.sleep(1.5) # Efecto dramático de búsqueda
+                    if comprobar_archivo_servidor(dominio_limpio, token):
+                        if dominio_limpio not in st.session_state['dominios_verificados']:
+                            st.session_state['dominios_verificados'].append(dominio_limpio)
+                        st.success(f"✅ ¡Éxito! El dominio {dominio_limpio} ha sido verificado legalmente.")
+                        time.sleep(2)
+                        st.rerun()
+                    else:
+                        st.error(f"❌ No se encontró el archivo en http://{dominio_limpio}/vulnscan-auth.txt o el código es incorrecto.")
+
+    with col_act2:
+        st.markdown("<div class='assets-card'><h3 style='margin:0; color:#f0f6fc; font-size:1.12rem;'> Propiedades Verificadas</h3></div>", unsafe_allow_html=True)
+        if len(st.session_state['dominios_verificados']) == 0:
+            st.warning("Aún no tienes ningún dominio verificado.")
+        else:
+            for dom in st.session_state['dominios_verificados']:
+                st.markdown(f"<div class='asset-domain-chip'>🟢 {dom}</div>", unsafe_allow_html=True)
 
 # ==========================================
 # PESTAÑA 1: DASHBOARD (Escáner Principal)
 # ==========================================
-if menu_dashboard.open:
-    with menu_dashboard:
-        # INICIALIZACIÓN DE LA BILLETERA DE TOKENS
-        if 'tokens_pro' not in st.session_state:
-            st.session_state['tokens_pro'] = 0
-        if 'tokens_ent' not in st.session_state:
-            st.session_state['tokens_ent'] = 0
+with menu_dashboard:
+    # INICIALIZACIÓN DE LA BILLETERA DE TOKENS
+    if 'tokens_pro' not in st.session_state:
+        st.session_state['tokens_pro'] = 0
+    if 'tokens_ent' not in st.session_state:
+        st.session_state['tokens_ent'] = 0
 
-        credit_columns = st.columns(3)
-        for credit_column, credit_label, credit_field in zip(
-            credit_columns,
-            ("Créditos activos", "Créditos OWASP", "Créditos PDF"),
-            ("tokens_pro", "tokens_ent", "tokens_pdf"),
-        ):
-            credit_column.metric(_vs_translate(credit_label), _credit_indicator_value(credit_field))
+    credit_columns = st.columns(3)
+    for credit_column, credit_label, credit_field in zip(
+        credit_columns,
+        ("Créditos activos", "Créditos OWASP", "Créditos PDF"),
+        ("tokens_pro", "tokens_ent", "tokens_pdf"),
+    ):
+        credit_column.metric(_vs_translate(credit_label), _credit_indicator_value(credit_field))
 
+    st.markdown("""
+    <style>
+        html, body, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
+            background-color: #0b0e14 !important;
+            font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+        }
+        .dashboard-hero {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 18px;
+        }
+        .dashboard-eyebrow {
+            margin: 0;
+            color: #8b949e;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            font-size: 0.78rem;
+            font-weight: 600;
+        }
+        .dashboard-title {
+            margin: 10px 0;
+            color: #f0f6fc;
+            font-size: 2rem;
+            line-height: 1.18;
+            letter-spacing: 0.3px;
+            font-weight: 700;
+        }
+        .dashboard-subtitle {
+            margin: 0 0 22px 0;
+            color: #9aa4af;
+            font-size: 1.03rem;
+            line-height: 1.65;
+        }
+        .hero-input-label {
+            margin: 0 0 8px 0;
+            color: #d0d7de;
+            font-size: 0.95rem;
+            font-weight: 600;
+            letter-spacing: 0.2px;
+        }
+        div[data-testid="stTextInput"] label {
+            display: none !important;
+        }
+        div[data-testid="stTextInput"] input {
+            background: #0f141b !important;
+            border: 1px solid #30363d !important;
+            border-radius: 12px !important;
+            color: #f0f6fc !important;
+            min-height: 50px;
+        }
+        div[data-testid="stTextInput"] input:focus {
+            border-color: rgba(0,255,204,0.6) !important;
+            box-shadow: 0 0 0 2px rgba(0,255,204,0.16);
+        }
+        div[data-testid="stButton"] > button[kind="primary"] {
+            background: linear-gradient(90deg, #00FFCC 0%, #00CCAA 100%) !important;
+            color: #03110f !important;
+            font-weight: 800 !important;
+            border: none !important;
+            border-radius: 12px !important;
+            min-height: 50px !important;
+            box-shadow: 0 10px 24px rgba(0,255,204,0.28);
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
+    col_input, col_dev = st.columns([3, 1])
+    with col_input:
         st.markdown("""
-        <style>
-            html, body, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
-                background-color: #0b0e14 !important;
-                font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
-            }
-            .dashboard-hero {
-                background: #161b22;
-                border: 1px solid #30363d;
-                border-radius: 12px;
-                padding: 30px;
-                margin-bottom: 18px;
-            }
-            .dashboard-eyebrow {
-                margin: 0;
-                color: #8b949e;
-                text-transform: uppercase;
-                letter-spacing: 1.2px;
-                font-size: 0.78rem;
-                font-weight: 600;
-            }
-            .dashboard-title {
-                margin: 10px 0;
-                color: #f0f6fc;
-                font-size: 2rem;
-                line-height: 1.18;
-                letter-spacing: 0.3px;
-                font-weight: 700;
-            }
-            .dashboard-subtitle {
-                margin: 0 0 22px 0;
-                color: #9aa4af;
-                font-size: 1.03rem;
-                line-height: 1.65;
-            }
-            .hero-input-label {
-                margin: 0 0 8px 0;
-                color: #d0d7de;
-                font-size: 0.95rem;
-                font-weight: 600;
-                letter-spacing: 0.2px;
-            }
-            div[data-testid="stTextInput"] label {
-                display: none !important;
-            }
-            div[data-testid="stTextInput"] input {
-                background: #0f141b !important;
-                border: 1px solid #30363d !important;
-                border-radius: 12px !important;
-                color: #f0f6fc !important;
-                min-height: 50px;
-            }
-            div[data-testid="stTextInput"] input:focus {
-                border-color: rgba(0,255,204,0.6) !important;
-                box-shadow: 0 0 0 2px rgba(0,255,204,0.16);
-            }
-            div[data-testid="stButton"] > button[kind="primary"] {
-                background: linear-gradient(90deg, #00FFCC 0%, #00CCAA 100%) !important;
-                color: #03110f !important;
-                font-weight: 800 !important;
-                border: none !important;
-                border-radius: 12px !important;
-                min-height: 50px !important;
-                box-shadow: 0 10px 24px rgba(0,255,204,0.28);
-            }
-        </style>
+            <div class="dashboard-hero">
+                <p class="dashboard-eyebrow">Auditoría de Seguridad Enterprise</p>
+                <h2 class="dashboard-title">Proteja su superficie digital con una auditoría precisa</h2>
+                <p class="dashboard-subtitle">Introduzca su dominio para iniciar un análisis técnico inmediato de exposición y configuración de seguridad.</p>
+                <p class="hero-input-label">🔒 URL objetivo</p>
+            </div>
         """, unsafe_allow_html=True)
-
-        col_input, col_dev = st.columns([3, 1])
-        with col_input:
-            st.markdown("""
-                <div class="dashboard-hero">
-                    <p class="dashboard-eyebrow">Auditoría de Seguridad Enterprise</p>
-                    <h2 class="dashboard-title">Proteja su superficie digital con una auditoría precisa</h2>
-                    <p class="dashboard-subtitle">Introduzca su dominio para iniciar un análisis técnico inmediato de exposición y configuración de seguridad.</p>
-                    <p class="hero-input-label">🔒 URL objetivo</p>
-                </div>
-            """, unsafe_allow_html=True)
-            dom = st.text_input(
-                "URL objetivo",
-                value=st.session_state.get('dominio_rapido', ''),
-                placeholder="https://tu-empresa.com",
-                label_visibility="collapsed"
-            )
+        dom = st.text_input(
+            "URL objetivo",
+            value=st.session_state.get('dominio_rapido', ''),
+            placeholder="https://tu-empresa.com",
+            label_visibility="collapsed"
+        )
     
 
-        if st.session_state['tokens_pro'] > 0 or st.session_state['tokens_ent'] > 0:
-            st.info(f"🪙 **Tu Billetera (Pago por uso):** {st.session_state['tokens_pro']} Escaneos Activos disponibles | {st.session_state['tokens_ent']} Auditorías OWASP disponibles")
+    if st.session_state['tokens_pro'] > 0 or st.session_state['tokens_ent'] > 0:
+        st.info(f"🪙 **Tu Billetera (Pago por uso):** {st.session_state['tokens_pro']} Escaneos Activos disponibles | {st.session_state['tokens_ent']} Auditorías OWASP disponibles")
 
-        # --- EL CONTRATO DIGITAL (CHECKBOX LEGAL) ---
-        st.markdown("<br>", unsafe_allow_html=True)
-        acepta_terminos = st.checkbox("⚖️ **Acuerdo de Responsabilidad:** Declaro bajo pena de perjurio que poseo autorización expresa para auditar este objetivo y asumo toda responsabilidad legal derivada de este análisis.")
+    # --- EL CONTRATO DIGITAL (CHECKBOX LEGAL) ---
+    st.markdown("<br>", unsafe_allow_html=True)
+    acepta_terminos = st.checkbox("⚖️ **Acuerdo de Responsabilidad:** Declaro bajo pena de perjurio que poseo autorización expresa para auditar este objetivo y asumo toda responsabilidad legal derivada de este análisis.")
 
-        email_audit = st.session_state.get("email_usuario", "")
-        plan_dash = st.session_state.get("plan_activo", "Basic")
-        st.caption(uso_objetivos_mes_texto(email_audit, plan_dash) if email_audit else "")
+    email_audit = st.session_state.get("email_usuario", "")
+    plan_dash = st.session_state.get("plan_activo", "Basic")
+    st.caption(uso_objetivos_mes_texto(email_audit, plan_dash) if email_audit else "")
     
-        # --- LÓGICA DE ESCANEO ---
-        if st.button("Iniciar Auditoría", type="primary", use_container_width=True):
-            if not acepta_terminos:
-                st.error("⚠️ **Firma digital requerida:** Debes marcar la casilla de responsabilidad legal para poder iniciar la auditoría.")
-            elif dom:
-                email_u = (st.session_state.get("email_usuario") or "").strip()
-                print(f"[Iniciar Auditoría] st.session_state['email_usuario'] (normalizado) = {email_u!r}")
-                if not email_u:
-                    st.error("No hay email de usuario en sesión. Cierra sesión y vuelve a entrar.")
+    # --- LÓGICA DE ESCANEO ---
+    if st.button("Iniciar Auditoría", type="primary", use_container_width=True):
+        if not acepta_terminos:
+            st.error("⚠️ **Firma digital requerida:** Debes marcar la casilla de responsabilidad legal para poder iniciar la auditoría.")
+        elif dom:
+            email_u = (st.session_state.get("email_usuario") or "").strip()
+            print(f"[Iniciar Auditoría] st.session_state['email_usuario'] (normalizado) = {email_u!r}")
+            if not email_u:
+                st.error("No hay email de usuario en sesión. Cierra sesión y vuelve a entrar.")
+            else:
+                plan = st.session_state.get('plan_activo', 'Basic')
+
+                niveles_por_plan = {
+                    "Basic": ["Rápido (Passive)"],
+                    "Pro": ["Rápido (Passive)", "Profundo (Active)"],
+                    "Enterprise": ["Rápido (Passive)", "Profundo (Active)", "Auditoría Completa (OWASP)"],
+                }
+                permitidos = niveles_por_plan.get(plan, ["Rápido (Passive)"])
+                pending_token = pending_scan_credit(st.session_state, dom.replace("https://", "").replace("http://", "").split("/")[0], nivel)
+                tokens_cubren = (nivel == "Profundo (Active)" and st.session_state['tokens_pro'] > 0) or (nivel == "Auditoría Completa (OWASP)" and st.session_state['tokens_ent'] > 0) or bool(pending_token)
+                if nivel not in permitidos and not tokens_cubren:
+                    st.error(f"Tu plan **{plan}** no incluye el nivel **{nivel}**. Puedes comprar un escaneo suelto o aumentar a un plan superior")
                 else:
-                    plan = st.session_state.get('plan_activo', 'Basic')
-
-                    niveles_por_plan = {
-                        "Basic": ["Rápido (Passive)"],
-                        "Pro": ["Rápido (Passive)", "Profundo (Active)"],
-                        "Enterprise": ["Rápido (Passive)", "Profundo (Active)", "Auditoría Completa (OWASP)"],
-                    }
-                    permitidos = niveles_por_plan.get(plan, ["Rápido (Passive)"])
-                    pending_token = pending_scan_credit(st.session_state, dom.replace("https://", "").replace("http://", "").split("/")[0], nivel)
-                    tokens_cubren = (nivel == "Profundo (Active)" and st.session_state['tokens_pro'] > 0) or (nivel == "Auditoría Completa (OWASP)" and st.session_state['tokens_ent'] > 0) or bool(pending_token)
-                    if nivel not in permitidos and not tokens_cubren:
-                        st.error(f"Tu plan **{plan}** no incluye el nivel **{nivel}**. Puedes comprar un escaneo suelto o aumentar a un plan superior")
+                    ok_cuota, msg_cuota = puede_escanear_nuevo_objetivo(email_u, dom, plan)
+                    if not ok_cuota:
+                        st.error(msg_cuota)
                     else:
-                        ok_cuota, msg_cuota = puede_escanear_nuevo_objetivo(email_u, dom, plan)
-                        if not ok_cuota:
-                            st.error(msg_cuota)
-                        else:
-                            tiene_acceso = False
-                            token_a_gastar = None
+                        tiene_acceso = False
+                        token_a_gastar = None
 
-                            if nivel == "Auditoría Completa (OWASP)":
-                                if plan == 'Enterprise':
-                                    tiene_acceso = True
-                                elif st.session_state['tokens_ent'] > 0 or pending_token == 'tokens_ent':
-                                    tiene_acceso = True
-                                    token_a_gastar = 'tokens_ent'
-                                else:
-                                    st.error("🔒 **Acceso Denegado.** Requiere la Suscripción Enterprise o comprar 1 Escaneo Suelto (149€).")
-                        
-                            elif nivel == "Profundo (Active)":
-                                if plan in ['Pro', 'Enterprise']:
-                                    tiene_acceso = True
-                                elif st.session_state['tokens_pro'] > 0 or pending_token == 'tokens_pro':
-                                    tiene_acceso = True
-                                    token_a_gastar = 'tokens_pro'
-                                else:
-                                    st.error("🔒 **Acceso Denegado.** Requiere la Suscripción Pro o comprar 1 Escaneo Suelto (39€).")
-                        
-                            else:
+                        if nivel == "Auditoría Completa (OWASP)":
+                            if plan == 'Enterprise':
                                 tiene_acceso = True
-
-                            dominio_limpio_scan = dom.replace("https://", "").replace("http://", "").split("/")[0]
-                            es_intrusivo = nivel in ["Profundo (Active)", "Auditoría Completa (OWASP)"]
-                        
-                            if tiene_acceso and es_intrusivo:
-                                if dominio_limpio_scan not in st.session_state['dominios_verificados']:
-                                    tiene_acceso = False
-                                    token_a_gastar = None
-                                    st.error(f"🛑 **BLOQUEO LEGAL:** No puedes lanzar un ataque intrusivo contra '{dominio_limpio_scan}' porque no has demostrado ser su propietario. Ve a la pestaña 'Mis Activos 🛡️' para verificarlo.")
-
-                            if nivel == "Rápido (Passive)":
-                                incluir_puertos = False
-                                incluir_cve = False
-                                incluir_owasp = False
-                            elif nivel == "Profundo (Active)":
-                                incluir_puertos = True
-                                incluir_cve = True
-                                incluir_owasp = False
+                            elif st.session_state['tokens_ent'] > 0 or pending_token == 'tokens_ent':
+                                tiene_acceso = True
+                                token_a_gastar = 'tokens_ent'
                             else:
-                                incluir_puertos = True
-                                incluir_cve = True
-                                incluir_owasp = True
+                                st.error("🔒 **Acceso Denegado.** Requiere la Suscripción Enterprise o comprar 1 Escaneo Suelto (149€).")
 
-                            if tiene_acceso:
-                                token_a_gastar = pending_token or token_a_gastar
-                                try:
-                                    begin_scan(st.session_state, supabase, token_a_gastar, dominio_limpio_scan, nivel)
-                                except ScanBusy as error:
-                                    st.info(str(error))
-                                    st.stop()
-                                except Exception:
-                                    st.error("No se pudo confirmar el credito; reintenta el mismo objetivo y nivel.")
-                                    st.stop()
-                                try:
-                                    msg_status = (
-                                        "🌍 Mapeo de puertos y CVE…" if incluir_puertos and not incluir_owasp
-                                        else "🔬 Auditoría OWASP" if incluir_owasp
-                                        else "🕵️ OSINT / DNS y huella HTTP…"
+                        elif nivel == "Profundo (Active)":
+                            if plan in ['Pro', 'Enterprise']:
+                                tiene_acceso = True
+                            elif st.session_state['tokens_pro'] > 0 or pending_token == 'tokens_pro':
+                                tiene_acceso = True
+                                token_a_gastar = 'tokens_pro'
+                            else:
+                                st.error("🔒 **Acceso Denegado.** Requiere la Suscripción Pro o comprar 1 Escaneo Suelto (39€).")
+
+                        else:
+                            tiene_acceso = True
+
+                        dominio_limpio_scan = dom.replace("https://", "").replace("http://", "").split("/")[0]
+                        es_intrusivo = nivel in ["Profundo (Active)", "Auditoría Completa (OWASP)"]
+                        
+                        if tiene_acceso and es_intrusivo:
+                            if dominio_limpio_scan not in st.session_state['dominios_verificados']:
+                                tiene_acceso = False
+                                token_a_gastar = None
+                                st.error(f"🛑 **BLOQUEO LEGAL:** No puedes lanzar un ataque intrusivo contra '{dominio_limpio_scan}' porque no has demostrado ser su propietario. Ve a la pestaña 'Mis Activos 🛡️' para verificarlo.")
+
+                        if nivel == "Rápido (Passive)":
+                            incluir_puertos = False
+                            incluir_cve = False
+                            incluir_owasp = False
+                        elif nivel == "Profundo (Active)":
+                            incluir_puertos = True
+                            incluir_cve = True
+                            incluir_owasp = False
+                        else:
+                            incluir_puertos = True
+                            incluir_cve = True
+                            incluir_owasp = True
+
+                        if tiene_acceso:
+                            token_a_gastar = pending_token or token_a_gastar
+                            try:
+                                begin_scan(st.session_state, supabase, token_a_gastar, dominio_limpio_scan, nivel)
+                            except ScanBusy as error:
+                                st.info(str(error))
+                                st.stop()
+                            except Exception:
+                                st.error("No se pudo confirmar el credito; reintenta el mismo objetivo y nivel.")
+                                st.stop()
+                            try:
+                                msg_status = (
+                                    "🌍 Mapeo de puertos y CVE…" if incluir_puertos and not incluir_owasp
+                                    else "🔬 Auditoría OWASP" if incluir_owasp
+                                    else "🕵️ OSINT / DNS y huella HTTP…"
+                                )
+                                with st.status(f"Iniciando análisis real sobre {dom}...") as s:
+                                    st.write(msg_status)
+                                    resultados_auditoria = run_reserved_scan(
+                                        st.session_state, supabase, escanear_objetivo_real, dom,
+                                        incluir_puertos=incluir_puertos,
+                                        incluir_cve_matching=incluir_cve,
+                                        incluir_owasp=incluir_owasp,
                                     )
-                                    with st.status(f"Iniciando análisis real sobre {dom}...") as s:
-                                        st.write(msg_status)
-                                        resultados_auditoria = run_reserved_scan(
-                                            st.session_state, supabase, escanear_objetivo_real, dom,
-                                            incluir_puertos=incluir_puertos,
-                                            incluir_cve_matching=incluir_cve,
-                                            incluir_owasp=incluir_owasp,
-                                        )
-                                        resultados_limpios = []
-                                        for r in resultados_auditoria:
-                                            if r not in resultados_limpios:
-                                                resultados_limpios.append(r)
-                                        resultados_auditoria = resultados_limpios
+                                    resultados_limpios = []
+                                    for r in resultados_auditoria:
+                                        if r not in resultados_limpios:
+                                            resultados_limpios.append(r)
+                                    resultados_auditoria = resultados_limpios
 
-                                        st.write("🔒 Analizando cabeceras de seguridad HTTP…")
-                                        s.update(label=f"¡Análisis de {dom} completado!", state="complete")
+                                    st.write("🔒 Analizando cabeceras de seguridad HTTP…")
+                                    s.update(label=f"¡Análisis de {dom} completado!", state="complete")
 
-                                        if not resultados_auditoria:
-                                            st.session_state['resultados_actuales'] = ["No se encontraron vulnerabilidades aparentes."]
-                                        else:
-                                            st.session_state['resultados_actuales'] = resultados_auditoria
+                                    if not resultados_auditoria:
+                                        st.session_state['resultados_actuales'] = ["No se encontraron vulnerabilidades aparentes."]
+                                    else:
+                                        st.session_state['resultados_actuales'] = resultados_auditoria
 
-                                        st.session_state['dominio_actual'] = dom
-                                        st.session_state['nivel_escaneo_guardado'] = nivel
-                                        st.session_state['dominio_rapido'] = dom
-                                        st.session_state['escaneo_actual_fecha'] = datetime.now().strftime("%d/%m/%Y")
-                                        st.session_state['escaneo_actual_riesgo'] = "Medio"
+                                    st.session_state['dominio_actual'] = dom
+                                    st.session_state['nivel_escaneo_guardado'] = nivel
+                                    st.session_state['dominio_rapido'] = dom
+                                    st.session_state['escaneo_actual_fecha'] = datetime.now().strftime("%d/%m/%Y")
+                                    st.session_state['escaneo_actual_riesgo'] = "Medio"
 
-                                        fallos_riesgo, _, _ = _clasificar_hallazgos_pdf(_preparar_resultados_pdf(resultados_auditoria))
-                                        crit_r = sum(1 for r in fallos_riesgo if any(t in r for t in ('[CRITICO]', '[ALERTA]', '[ALTO]')))
-                                        med_r = sum(1 for r in fallos_riesgo if '[MEDIO]' in r)
-                                        puntos_r = (crit_r * 15) + (med_r * 7)
-                                        nota_r = max(5, min(100, 100 - puntos_r))
-                                        if nota_r >= 80:
-                                            nivel_riesgo_real = "Optimo (Bajo Riesgo)"
-                                        elif nota_r >= 50:
-                                            nivel_riesgo_real = "Moderado"
-                                        else:
-                                            nivel_riesgo_real = "CRITICO (Alto Riesgo)"
+                                    fallos_riesgo, _, _ = _clasificar_hallazgos_pdf(_preparar_resultados_pdf(resultados_auditoria))
+                                    crit_r = sum(1 for r in fallos_riesgo if any(t in r for t in ('[CRITICO]', '[ALERTA]', '[ALTO]')))
+                                    med_r = sum(1 for r in fallos_riesgo if '[MEDIO]' in r)
+                                    puntos_r = (crit_r * 15) + (med_r * 7)
+                                    nota_r = max(5, min(100, 100 - puntos_r))
+                                    if nota_r >= 80:
+                                        nivel_riesgo_real = "Optimo (Bajo Riesgo)"
+                                    elif nota_r >= 50:
+                                        nivel_riesgo_real = "Moderado"
+                                    else:
+                                        nivel_riesgo_real = "CRITICO (Alto Riesgo)"
 
-                                        nuevo_escaneo = {
-                                            "email_cliente": email_u,
-                                            "dominio": dom,
-                                            "tipo": nivel,
-                                            "fecha": datetime.now().strftime("%d/%m/%Y"),
-                                            "riesgo": nivel_riesgo_real,
-                                            "resultados_json": json.dumps(resultados_auditoria)
-                                        }
-                                        nuevo_escaneo["id"] = store_scan(st.session_state, supabase, nuevo_escaneo)
+                                    nuevo_escaneo = {
+                                        "email_cliente": email_u,
+                                        "dominio": dom,
+                                        "tipo": nivel,
+                                        "fecha": datetime.now().strftime("%d/%m/%Y"),
+                                        "riesgo": nivel_riesgo_real,
+                                        "resultados_json": json.dumps(resultados_auditoria)
+                                    }
+                                    nuevo_escaneo["id"] = store_scan(st.session_state, supabase, nuevo_escaneo)
 
-                                        registrar_dominio_cliente(email_u, dom)
-                                        registrar_objetivo_mes_si_nuevo(email_u, dom)
+                                    registrar_dominio_cliente(email_u, dom)
+                                    registrar_objetivo_mes_si_nuevo(email_u, dom)
 
-                                        st.session_state['historial_escaneos'].append(nuevo_escaneo)
+                                    st.session_state['historial_escaneos'].append(nuevo_escaneo)
 
-                                        prev_scans = int(st.session_state.get("escaneos_realizados", 0))
-                                        sync_email = (st.session_state.get("email_usuario") or "").strip()
-                                        print(
-                                            f"[escaneos_realizados] sync_email={sync_email!r} "
-                                            f"email_u={email_u!r} match={sync_email == email_u} "
-                                            f"prev_scans={prev_scans} nuevo={prev_scans + 1}"
-                                        )
-                                        actualizar_usuario_supabase(
-                                            sync_email, "escaneos_realizados", prev_scans + 1
-                                        )
+                                    prev_scans = int(st.session_state.get("escaneos_realizados", 0))
+                                    sync_email = (st.session_state.get("email_usuario") or "").strip()
+                                    print(
+                                        f"[escaneos_realizados] sync_email={sync_email!r} "
+                                        f"email_u={email_u!r} match={sync_email == email_u} "
+                                        f"prev_scans={prev_scans} nuevo={prev_scans + 1}"
+                                    )
+                                    actualizar_usuario_supabase(
+                                        sync_email, "escaneos_realizados", prev_scans + 1
+                                    )
 
 
-                                        nuevo_escaneo["resultados"] = resultados_auditoria
-                                        st.session_state["escaneo_actual_id"] = _id_reporte_desde_fila(nuevo_escaneo)
-                                        _sincronizar_derecho_pdf_en_sesion(nuevo_escaneo)
+                                    nuevo_escaneo["resultados"] = resultados_auditoria
+                                    st.session_state["escaneo_actual_id"] = _id_reporte_desde_fila(nuevo_escaneo)
+                                    _sincronizar_derecho_pdf_en_sesion(nuevo_escaneo)
 
-                                        st.rerun()
-                                except Exception as error:
-                                    logging.getLogger("vulnscan.billing").warning("operation=scan_flow error_type=%s", type(error).__name__)
-                                    st.error("No se pudo confirmar el escaneo. El crédito solo se consume al confirmar el informe guardado; si ya aparece un resultado, reintenta para confirmar su estado.")
-                                finally:
-                                    finish_scan(st.session_state, supabase)
-            else:
-                st.warning("⚠️ Escribe un dominio primero para poder iniciar el escaneo.")
+                                    st.rerun()
+                            except Exception as error:
+                                logging.getLogger("vulnscan.billing").warning("operation=scan_flow error_type=%s", type(error).__name__)
+                                st.error("No se pudo confirmar el escaneo. El crédito solo se consume al confirmar el informe guardado; si ya aparece un resultado, reintenta para confirmar su estado.")
+                            finally:
+                                finish_scan(st.session_state, supabase)
+        else:
+            st.warning("⚠️ Escribe un dominio primero para poder iniciar el escaneo.")
 
-        # --- RESULTADOS Y DESCARGA DE PDF ---
-        # --- Recuperar último escaneo desde Supabase si se perdió por redirección de Stripe ---
-        if not _tiene_escaneo_visible_en_sesion():
-            email_recuperar = st.session_state.get("email_usuario", "")
-            if email_recuperar:
-                restaurar_ultimo_escaneo_supabase(email_recuperar)
+    # --- RESULTADOS Y DESCARGA DE PDF ---
+    # --- Recuperar último escaneo desde Supabase si se perdió por redirección de Stripe ---
+    if not _tiene_escaneo_visible_en_sesion():
+        email_recuperar = st.session_state.get("email_usuario", "")
+        if email_recuperar:
+            restaurar_ultimo_escaneo_supabase(email_recuperar)
 
-        if not _tiene_escaneo_visible_en_sesion():
-            icono_estado = (
-                f'<img src="data:image/png;base64,{logo_b64}" style="width:72px; height:auto; margin-bottom:10px;">'
-                if logo_b64 else "🛡️"
-            )
-            st.markdown(f"""
-                <div style="background:#161b22; border:1px solid #30363d; border-radius:12px; padding:36px 26px; text-align:center; margin-top:16px;">
-                    <div style="font-size:2rem; margin-bottom:10px;">{icono_estado}</div>
-                    <p style="margin:0; color:#c9d1d9; font-size:1rem; line-height:1.65;">
-                        Listo para asegurar su infraestructura. Inicie un escaneo para detectar vulnerabilidades.
-                    </p>
-                </div>
-            """, unsafe_allow_html=True)
-        if _tiene_escaneo_visible_en_sesion():
-            resultados = st.session_state['resultados_actuales']
-            dominio_escaneado = st.session_state.get('dominio_actual', '')
-            nivel_usado = st.session_state.get('nivel_escaneo_guardado', 'Rápido (Passive)')
-            _sincronizar_derecho_pdf_en_sesion()
+    if not _tiene_escaneo_visible_en_sesion():
+        icono_estado = (
+            f'<img src="data:image/png;base64,{logo_b64}" style="width:72px; height:auto; margin-bottom:10px;">'
+            if logo_b64 else "🛡️"
+        )
+        st.markdown(f"""
+            <div style="background:#161b22; border:1px solid #30363d; border-radius:12px; padding:36px 26px; text-align:center; margin-top:16px;">
+                <div style="font-size:2rem; margin-bottom:10px;">{icono_estado}</div>
+                <p style="margin:0; color:#c9d1d9; font-size:1rem; line-height:1.65;">
+                    Listo para asegurar su infraestructura. Inicie un escaneo para detectar vulnerabilidades.
+                </p>
+            </div>
+        """, unsafe_allow_html=True)
+    if _tiene_escaneo_visible_en_sesion():
+        resultados = st.session_state['resultados_actuales']
+        dominio_escaneado = st.session_state.get('dominio_actual', '')
+        nivel_usado = st.session_state.get('nivel_escaneo_guardado', 'Rápido (Passive)')
+        _sincronizar_derecho_pdf_en_sesion()
 
-            st.markdown("---")
-            st.subheader(" Exportar Resultados")
+        st.markdown("---")
+        st.subheader(" Exportar Resultados")
         
-            plan_actual = st.session_state.get('plan_activo', 'Basic')
-            tokens_pdf = int(st.session_state.get("tokens_pdf") or 0)
-            tiene_derecho_pdf = bool(st.session_state.get("pdf_descarga_habilitada")) or _pdf_desbloqueado_servidor(
-                st.session_state.get("escaneo_actual_id", ""))
-            if not tiene_derecho_pdf:
-                st.button("🔒 Descargar Reporte en PDF (Pro)", use_container_width=True, disabled=True)
-                st.error("🔒 **Función Premium.** Necesitas el Plan Pro para exportar un escaneo Pasivo en formato ejecutivo.")
+        plan_actual = st.session_state.get('plan_activo', 'Basic')
+        tokens_pdf = int(st.session_state.get("tokens_pdf") or 0)
+        tiene_derecho_pdf = bool(st.session_state.get("pdf_descarga_habilitada")) or _pdf_desbloqueado_servidor(
+            st.session_state.get("escaneo_actual_id", ""))
+        if not tiene_derecho_pdf:
+            st.button("🔒 Descargar Reporte en PDF (Pro)", use_container_width=True, disabled=True)
+            st.error("🔒 **Función Premium.** Necesitas el Plan Pro para exportar un escaneo Pasivo en formato ejecutivo.")
             
-                st.markdown("**Elige cómo quieres desbloquearlo:**")
-                col_v1, col_v2 = st.columns(2)
-                email_pago = st.session_state.get("email_usuario", "")
-                usuario_logueado = bool(st.session_state.get("usuario_autenticado")) and bool(email_pago)
-                with col_v1:
-                    if usuario_logueado:
-                        _purchase_button(STRIPE_PRICES['pdf_unico'], email_pago, 'pdf_unico', 'payment', ' Descargar Reporte Completo (9,99€)', 'purchase_2493', use_container_width=True)
-                    else:
-                        st.info("Inicia sesión para habilitar el pago.")
-                with col_v2:
-                    if usuario_logueado:
-                        _purchase_button(STRIPE_PRICES['pro_recurrente'], email_pago, 'pro_recurrente', 'subscription', ' Mejorar a Plan Pro', 'purchase_2504', type='primary', use_container_width=True)
-                    else:
-                        st.info("Inicia sesión para habilitar el pago.")
-                st.info("💡 Serás redirigido a la pasarela segura. Una vez completado el pago, tu cuenta se actualizará automáticamente.")
-
-            else:
-                st.success("Reporte generado correctamente. Ya puedes descargarlo.")
-                pdf_generado = crear_pdf(dom, resultados, nivel=nivel)
-                email_pago = st.session_state.get("email_usuario", "")
-
-                if not st.session_state.get("token_pdf_descontado"):
-                    if _descargar_pdf_seguro(
-                        label="⬇️ Descargar Reporte Ejecutivo (.pdf)",
-                        data=pdf_generado,
-                        file_name=f"Auditoria_{dominio_escaneado.replace('.', '_')}.pdf",
-                        mime="application/pdf",
-                        use_container_width=True,
-                        type="primary"
-                    ):
-                        pass  # Consumo autorizado por RPC antes de servir el PDF.
+            st.markdown("**Elige cómo quieres desbloquearlo:**")
+            col_v1, col_v2 = st.columns(2)
+            email_pago = st.session_state.get("email_usuario", "")
+            usuario_logueado = bool(st.session_state.get("usuario_autenticado")) and bool(email_pago)
+            with col_v1:
+                if usuario_logueado:
+                    _purchase_button(STRIPE_PRICES['pdf_unico'], email_pago, 'pdf_unico', 'payment', ' Descargar Reporte Completo (9,99€)', 'purchase_2493', use_container_width=True)
                 else:
-                    _descargar_pdf_seguro(
-                        label="⬇️ Descargar Reporte Ejecutivo (.pdf)",
-                        data=pdf_generado,
-                        file_name=f"Auditoria_{dominio_escaneado.replace('.', '_')}.pdf",
-                        mime="application/pdf",
-                        use_container_width=True,
-                        type="primary"
-                    )
-                    pass  # Consumo autorizado por RPC antes de servir el PDF.
-            st.markdown("---")
-            tab_resumen, tab_plan_accion = st.tabs(["📊 Resumen", "💡 Plan de Acción"])
+                    st.info("Inicia sesión para habilitar el pago.")
+            with col_v2:
+                if usuario_logueado:
+                    _purchase_button(STRIPE_PRICES['pro_recurrente'], email_pago, 'pro_recurrente', 'subscription', ' Mejorar a Plan Pro', 'purchase_2504', type='primary', use_container_width=True)
+                else:
+                    st.info("Inicia sesión para habilitar el pago.")
+            st.info("💡 Serás redirigido a la pasarela segura. Una vez completado el pago, tu cuenta se actualizará automáticamente.")
 
-            with tab_resumen:
-                # Capa visual premium para el resumen ejecutivo de resultados
-                st.markdown("""
+        else:
+            st.success("Reporte generado correctamente. Ya puedes descargarlo.")
+            pdf_generado = crear_pdf(dom, resultados, nivel=nivel)
+            email_pago = st.session_state.get("email_usuario", "")
+
+            if not st.session_state.get("token_pdf_descontado"):
+                if _descargar_pdf_seguro(
+                    label="⬇️ Descargar Reporte Ejecutivo (.pdf)",
+                    data=pdf_generado,
+                    file_name=f"Auditoria_{dominio_escaneado.replace('.', '_')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                    type="primary"
+                ):
+                    pass  # Consumo autorizado por RPC antes de servir el PDF.
+            else:
+                _descargar_pdf_seguro(
+                    label="⬇️ Descargar Reporte Ejecutivo (.pdf)",
+                    data=pdf_generado,
+                    file_name=f"Auditoria_{dominio_escaneado.replace('.', '_')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                    type="primary"
+                )
+                pass  # Consumo autorizado por RPC antes de servir el PDF.
+        st.markdown("---")
+        tab_resumen, tab_plan_accion = st.tabs(["📊 Resumen", "💡 Plan de Acción"])
+
+        with tab_resumen:
+            # Capa visual premium para el resumen ejecutivo de resultados
+            st.markdown("""
+                <style>
+                    .res-card {
+                        background: linear-gradient(170deg, #161b22 0%, #131820 100%);
+                        border: 1px solid #30363d;
+                        border-radius: 12px;
+                        padding: 16px 18px;
+                        margin-bottom: 12px;
+                    }
+                    .res-kicker {
+                        margin: 0;
+                        color: #8b949e;
+                        font-size: 0.74rem;
+                        letter-spacing: 1.1px;
+                        text-transform: uppercase;
+                        font-weight: 700;
+                    }
+                    .res-title {
+                        margin: 6px 0 0 0;
+                        color: #f0f6fc;
+                        font-size: 1.12rem;
+                        font-weight: 700;
+                        line-height: 1.25;
+                    }
+                    .risk-box {
+                        background: #0f141b;
+                        border: 1px solid #30363d;
+                        border-radius: 12px;
+                        padding: 14px;
+                        margin-bottom: 10px;
+                    }
+                    .risk-label {
+                        color: #8b949e;
+                        font-size: 0.8rem;
+                        font-weight: 600;
+                        letter-spacing: 0.6px;
+                        text-transform: uppercase;
+                        margin: 0 0 4px 0;
+                    }
+                    .risk-value {
+                        color: #f0f6fc;
+                        font-size: 1.55rem;
+                        font-weight: 800;
+                        line-height: 1.1;
+                        margin: 0;
+                    }
+                    .risk-sub {
+                        color: #9aa4af;
+                        font-size: 0.86rem;
+                        margin: 6px 0 0 0;
+                        line-height: 1.45;
+                    }
+                </style>
+            """, unsafe_allow_html=True)
+
+            col_g, col_t = st.columns([1, 1], gap="large")
+            with col_g:
+                fallos = [r for r in resultados if
+                 ("[CRITICO]" in r or "[ALERTA]" in r or "[ALTO]" in r or "[MEDIO]" in r or
+                 "Falta" in r or "Protocolo" in r or "Cifrado" in r or "Version Antigua" in r or
+                 "expuesta" in r or "Ausente" in r or "Insegura" in r or "Peligrosos" in r or
+                 "Takeover" in r or "Fuga" in r or "CORS Mal" in r or "Confirmado" in r or
+                 "Detectado" in r or
+                 ("Fuzzing" in r and ("[CRÍTICO]" in r or "[ALTO]" in r or "[MEDIO]" in r)) or
+                 ("CVE" in r and ("[CRITICO]" in r or "[ALTO]" in r or "[MEDIO]" in r)) or
+                 ("Fichero" in r and "CRÍTICO" in r and "accesible" in r and "INFO" not in r))
+                 and "No se detectaron" not in r
+                 and "No se detectó" not in r
+                 and "Deshabilitado" not in r
+                 and "[INFO]" not in r
+                 and "✅" not in r
+                ]
+                fallos_dashboard, _, _ = _clasificar_hallazgos_pdf(_preparar_resultados_pdf(resultados))
+                crit_count = sum(1 for r in fallos_dashboard if any(t in r for t in ('[CRITICO]', '[ALERTA]', '[ALTO]')))
+                med_count = sum(1 for r in fallos_dashboard if '[MEDIO]' in r or 'Vulnerabilidad Media' in r)
+                puntos_a_restar = (crit_count * 15) + (med_count * 7)
+                nota_final = 100 - puntos_a_restar
+
+                # 3. Resultado final para el círculo
+                seg_val = max(5, min(100, nota_final))
+
+                # 4. Ajuste de barras visuales
+                total_items = crit_count + med_count + 5 # Base para que las barras luzcan bien
+                pct_crit = min(100, (crit_count / total_items) * 100)
+                pct_med = min(100, (med_count / total_items) * 100)
+                pct_seg = seg_val # La barra verde brilla según la nota
+
+                crit_num_html = f"{crit_count}&nbsp;🚨" if crit_count > 0 else "0"
+
+                st.markdown(
+                    f"""
                     <style>
-                        .res-card {
-                            background: linear-gradient(170deg, #161b22 0%, #131820 100%);
-                            border: 1px solid #30363d;
-                            border-radius: 12px;
-                            padding: 16px 18px;
-                            margin-bottom: 12px;
-                        }
-                        .res-kicker {
+                        .exp-card {{
+                            font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                            background: rgba(30, 33, 48, 0.92);
+                            border-radius: 16px;
+                            padding: 20px;
+                            box-sizing: border-box;
+                        }}
+                        .exp-head {{
+                            display: flex;
+                            justify-content: space-between;
+                            align-items: center;
+                            margin-bottom: 18px;
+                        }}
+                        .exp-title {{
                             margin: 0;
-                            color: #8b949e;
-                            font-size: 0.74rem;
-                            letter-spacing: 1.1px;
-                            text-transform: uppercase;
+                            font-size: 1.08rem;
                             font-weight: 700;
-                        }
-                        .res-title {
-                            margin: 6px 0 0 0;
-                            color: #f0f6fc;
-                            font-size: 1.12rem;
-                            font-weight: 700;
-                            line-height: 1.25;
-                        }
-                        .risk-box {
-                            background: #0f141b;
-                            border: 1px solid #30363d;
-                            border-radius: 12px;
-                            padding: 14px;
-                            margin-bottom: 10px;
-                        }
-                        .risk-label {
+                            color: #eceff4;
+                            letter-spacing: 0.02em;
+                        }}
+                        .exp-menu {{
                             color: #8b949e;
-                            font-size: 0.8rem;
+                            font-size: 1.25rem;
+                            line-height: 1;
+                            user-select: none;
+                        }}
+                        .exp-row {{
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            margin-bottom: 14px;
+                        }}
+                        .exp-row:last-child {{ margin-bottom: 0; }}
+                        .exp-label {{
+                            flex: 0 0 15%;
+                            width: 15%;
+                            text-align: center;
                             font-weight: 600;
-                            letter-spacing: 0.6px;
-                            text-transform: uppercase;
-                            margin: 0 0 4px 0;
-                        }
-                        .risk-value {
-                            color: #f0f6fc;
-                            font-size: 1.55rem;
-                            font-weight: 800;
-                            line-height: 1.1;
-                            margin: 0;
-                        }
-                        .risk-sub {
-                            color: #9aa4af;
-                            font-size: 0.86rem;
-                            margin: 6px 0 0 0;
-                            line-height: 1.45;
-                        }
+                            font-size: 0.88rem;
+                        }}
+                        .exp-bar-wrap {{
+                            flex: 0 0 70%;
+                            width: 70%;
+                            padding: 0 10px;
+                            box-sizing: border-box;
+                        }}
+                        .exp-bar-track {{
+                            background: #33384a;
+                            border-radius: 8px;
+                            height: 10px;
+                            overflow: hidden;
+                        }}
+                        .exp-bar-fill {{
+                            height: 100%;
+                            border-radius: 8px;
+                            transition: width 0.35s ease;
+                        }}
+                        .exp-num {{
+                            flex: 0 0 15%;
+                            width: 15%;
+                            text-align: right;
+                            font-weight: 700;
+                            font-size: 0.95rem;
+                            color: #dce1e9;
+                        }}
                     </style>
+                    <div class="exp-card">
+                        <div class="exp-head">
+                            <p class="exp-title">Resumen de Exposición Detectada</p>
+                            <span class="exp-menu" aria-hidden="true">⋮</span>
+                        </div>
+                        <div class="exp-row">
+                            <span class="exp-label" style="color:#ff5c5c;">Crítico</span>
+                            <div class="exp-bar-wrap">
+                                <div class="exp-bar-track">
+                                    <div class="exp-bar-fill" style="width:{pct_crit}%; background:#ff5c5c;"></div>
+                                </div>
+                            </div>
+                            <span class="exp-num">{crit_num_html}</span>
+                        </div>
+                        <div class="exp-row">
+                            <span class="exp-label" style="color:#ffb347;">Medio</span>
+                            <div class="exp-bar-wrap">
+                                <div class="exp-bar-track">
+                                    <div class="exp-bar-fill" style="width:{pct_med}%; background:#ffb347;"></div>
+                                </div>
+                            </div>
+                            <span class="exp-num">{med_count}</span>
+                        </div>
+                        <div class="exp-row">
+                            <span class="exp-label" style="color:#00e676;">Seguro</span>
+                            <div class="exp-bar-wrap">
+                                <div class="exp-bar-track">
+                                    <div class="exp-bar-fill" style="width:{pct_seg}%; background:#00e676;"></div>
+                                </div>
+                            </div>
+                            <span class="exp-num">{seg_val}</span>
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            
+            with col_t:
+                exposicion_score = seg_val
+                
+                if exposicion_score >= 80:
+                    nivel_riesgo = "Óptimo"
+                    color_riesgo = "#00FFCC"
+                elif 50 <= exposicion_score <= 79:
+                    nivel_riesgo = "Moderado"
+                    color_riesgo = "#FFBD45"
+                else:
+                    nivel_riesgo = "Crítico"
+                    color_riesgo = "#FF4B4B"
+
+                st.markdown("""
+                    <div class="res-card">
+                        <p class="res-kicker">Risk Console</p>
+                        <p class="res-title">Alertas detectadas</p>
+                    </div>
                 """, unsafe_allow_html=True)
 
-                col_g, col_t = st.columns([1, 1], gap="large")
-                with col_g:
-                    fallos = [r for r in resultados if
-                     ("[CRITICO]" in r or "[ALERTA]" in r or "[ALTO]" in r or "[MEDIO]" in r or
-                     "Falta" in r or "Protocolo" in r or "Cifrado" in r or "Version Antigua" in r or
-                     "expuesta" in r or "Ausente" in r or "Insegura" in r or "Peligrosos" in r or
-                     "Takeover" in r or "Fuga" in r or "CORS Mal" in r or "Confirmado" in r or
-                     "Detectado" in r or
-                     ("Fuzzing" in r and ("[CRÍTICO]" in r or "[ALTO]" in r or "[MEDIO]" in r)) or
-                     ("CVE" in r and ("[CRITICO]" in r or "[ALTO]" in r or "[MEDIO]" in r)) or
-                     ("Fichero" in r and "CRÍTICO" in r and "accesible" in r and "INFO" not in r))
-                     and "No se detectaron" not in r
-                     and "No se detectó" not in r
-                     and "Deshabilitado" not in r
-                     and "[INFO]" not in r
-                     and "✅" not in r
-                    ]
-                    fallos_dashboard, _, _ = _clasificar_hallazgos_pdf(_preparar_resultados_pdf(resultados))
-                    crit_count = sum(1 for r in fallos_dashboard if any(t in r for t in ('[CRITICO]', '[ALERTA]', '[ALTO]')))
-                    med_count = sum(1 for r in fallos_dashboard if '[MEDIO]' in r or 'Vulnerabilidad Media' in r)
-                    puntos_a_restar = (crit_count * 15) + (med_count * 7)
-                    nota_final = 100 - puntos_a_restar
+                st.markdown(f"""
+                    <div class="risk-box">
+                        <p class="risk-label">Índice de seguridad global</p>
+                        <p class="risk-value">{exposicion_score}/100</p>
+                        <p class="risk-sub">Nivel de riesgo actual: <span style="color:{color_riesgo}; font-weight:700;">{nivel_riesgo}</span></p>
+                    </div>
+                """, unsafe_allow_html=True)
+            c1, c2, c3 = st.columns(3, gap="small")
+            with c1:
+                st.metric("Críticas", crit_count, delta=None, help="Hallazgos de impacto alto.")
+            with c2:
+                st.metric("Medias", med_count, delta=None, help="Hallazgos de impacto medio.")
+            with c3:
+                st.metric("Seguridad", f"{seg_val}%", delta=None, help="Nivel de configuraciones seguras.")
 
-                    # 3. Resultado final para el círculo
-                    seg_val = max(5, min(100, nota_final))
+            if crit_count > 0:
+                st.error(f"🔴 Se detectaron {crit_count} vulnerabilidades críticas o puertos expuestos.")
+            else:
+                st.success("🟢 No se detectaron vulnerabilidades críticas.")
 
-                    # 4. Ajuste de barras visuales
-                    total_items = crit_count + med_count + 5 # Base para que las barras luzcan bien
-                    pct_crit = min(100, (crit_count / total_items) * 100)
-                    pct_med = min(100, (med_count / total_items) * 100)
-                    pct_seg = seg_val # La barra verde brilla según la nota
+            st.warning(f"🟡 Avisos y revelación de información: {med_count}")
 
-                    crit_num_html = f"{crit_count}&nbsp;🚨" if crit_count > 0 else "0"
-
-                    st.markdown(
-                        f"""
-                        <style>
-                            .exp-card {{
-                                font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-                                background: rgba(30, 33, 48, 0.92);
-                                border-radius: 16px;
-                                padding: 20px;
-                                box-sizing: border-box;
-                            }}
-                            .exp-head {{
-                                display: flex;
-                                justify-content: space-between;
-                                align-items: center;
-                                margin-bottom: 18px;
-                            }}
-                            .exp-title {{
-                                margin: 0;
-                                font-size: 1.08rem;
-                                font-weight: 700;
-                                color: #eceff4;
-                                letter-spacing: 0.02em;
-                            }}
-                            .exp-menu {{
-                                color: #8b949e;
-                                font-size: 1.25rem;
-                                line-height: 1;
-                                user-select: none;
-                            }}
-                            .exp-row {{
-                                display: flex;
-                                align-items: center;
-                                justify-content: center;
-                                margin-bottom: 14px;
-                            }}
-                            .exp-row:last-child {{ margin-bottom: 0; }}
-                            .exp-label {{
-                                flex: 0 0 15%;
-                                width: 15%;
-                                text-align: center;
-                                font-weight: 600;
-                                font-size: 0.88rem;
-                            }}
-                            .exp-bar-wrap {{
-                                flex: 0 0 70%;
-                                width: 70%;
-                                padding: 0 10px;
-                                box-sizing: border-box;
-                            }}
-                            .exp-bar-track {{
-                                background: #33384a;
-                                border-radius: 8px;
-                                height: 10px;
-                                overflow: hidden;
-                            }}
-                            .exp-bar-fill {{
-                                height: 100%;
-                                border-radius: 8px;
-                                transition: width 0.35s ease;
-                            }}
-                            .exp-num {{
-                                flex: 0 0 15%;
-                                width: 15%;
-                                text-align: right;
-                                font-weight: 700;
-                                font-size: 0.95rem;
-                                color: #dce1e9;
-                            }}
-                        </style>
-                        <div class="exp-card">
-                            <div class="exp-head">
-                                <p class="exp-title">Resumen de Exposición Detectada</p>
-                                <span class="exp-menu" aria-hidden="true">⋮</span>
-                            </div>
-                            <div class="exp-row">
-                                <span class="exp-label" style="color:#ff5c5c;">Crítico</span>
-                                <div class="exp-bar-wrap">
-                                    <div class="exp-bar-track">
-                                        <div class="exp-bar-fill" style="width:{pct_crit}%; background:#ff5c5c;"></div>
-                                    </div>
-                                </div>
-                                <span class="exp-num">{crit_num_html}</span>
-                            </div>
-                            <div class="exp-row">
-                                <span class="exp-label" style="color:#ffb347;">Medio</span>
-                                <div class="exp-bar-wrap">
-                                    <div class="exp-bar-track">
-                                        <div class="exp-bar-fill" style="width:{pct_med}%; background:#ffb347;"></div>
-                                    </div>
-                                </div>
-                                <span class="exp-num">{med_count}</span>
-                            </div>
-                            <div class="exp-row">
-                                <span class="exp-label" style="color:#00e676;">Seguro</span>
-                                <div class="exp-bar-wrap">
-                                    <div class="exp-bar-track">
-                                        <div class="exp-bar-fill" style="width:{pct_seg}%; background:#00e676;"></div>
-                                    </div>
-                                </div>
-                                <span class="exp-num">{seg_val}</span>
-                            </div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-            
-                with col_t:
-                    exposicion_score = seg_val
-                
-                    if exposicion_score >= 80:
-                        nivel_riesgo = "Óptimo"
-                        color_riesgo = "#00FFCC"
-                    elif 50 <= exposicion_score <= 79:
-                        nivel_riesgo = "Moderado"
-                        color_riesgo = "#FFBD45"
-                    else:
-                        nivel_riesgo = "Crítico"
-                        color_riesgo = "#FF4B4B"
-
-                    st.markdown("""
-                        <div class="res-card">
-                            <p class="res-kicker">Risk Console</p>
-                            <p class="res-title">Alertas detectadas</p>
-                        </div>
-                    """, unsafe_allow_html=True)
-
-                    st.markdown(f"""
-                        <div class="risk-box">
-                            <p class="risk-label">Índice de seguridad global</p>
-                            <p class="risk-value">{exposicion_score}/100</p>
-                            <p class="risk-sub">Nivel de riesgo actual: <span style="color:{color_riesgo}; font-weight:700;">{nivel_riesgo}</span></p>
-                        </div>
-                    """, unsafe_allow_html=True)
-                c1, c2, c3 = st.columns(3, gap="small")
-                with c1:
-                    st.metric("Críticas", crit_count, delta=None, help="Hallazgos de impacto alto.")
-                with c2:
-                    st.metric("Medias", med_count, delta=None, help="Hallazgos de impacto medio.")
-                with c3:
-                    st.metric("Seguridad", f"{seg_val}%", delta=None, help="Nivel de configuraciones seguras.")
-
-                if crit_count > 0:
-                    st.error(f"🔴 Se detectaron {crit_count} vulnerabilidades críticas o puertos expuestos.")
-                else:
-                    st.success("🟢 No se detectaron vulnerabilidades críticas.")
-
-                st.warning(f"🟡 Avisos y revelación de información: {med_count}")
-
-                if seg_val > 0:
-                    st.success("🟢 Se han detectado protecciones y configuraciones seguras activas.")
-                else:
-                    st.error("🔴 Carencia severa de configuraciones de seguridad base (ej. SSL o Cabeceras).")
+            if seg_val > 0:
+                st.success("🟢 Se han detectado protecciones y configuraciones seguras activas.")
+            else:
+                st.error("🔴 Carencia severa de configuraciones de seguridad base (ej. SSL o Cabeceras).")
 
 
-            with tab_plan_accion:
-                st.write("1. Entregar este informe al responsable de sistemas (CTO).")
-                st.write("2. Abordar prioritariamente las alertas críticas.")
+        with tab_plan_accion:
+            st.write("1. Entregar este informe al responsable de sistemas (CTO).")
+            st.write("2. Abordar prioritariamente las alertas críticas.")
 
 # ==========================================
 # PESTAÑA 2: ESCANEOS (Tipos y Tarífas + Historial)
 # ==========================================
-if menu_escaneos.open:
-    with menu_escaneos:
-        # --- CAPA VISUAL PREMIUM (SIN CAMBIAR LÓGICA) ---
-        st.markdown("""
-        <style>
-        .scan-hero {
-            background: radial-gradient(1200px 280px at 10% -20%, rgba(0,255,204,0.12), transparent 45%),
-                        radial-gradient(900px 220px at 110% -30%, rgba(96,180,255,0.12), transparent 42%),
+with menu_escaneos:
+    # --- CAPA VISUAL PREMIUM (SIN CAMBIAR LÓGICA) ---
+    st.markdown("""
+    <style>
+    .scan-hero {
+        background: radial-gradient(1200px 280px at 10% -20%, rgba(0,255,204,0.12), transparent 45%),
+                    radial-gradient(900px 220px at 110% -30%, rgba(96,180,255,0.12), transparent 42%),
+                    linear-gradient(180deg, #171d26 0%, #121820 100%);
+        border: 1px solid #30363d;
+        border-radius: 16px;
+        padding: 24px 24px 20px 24px;
+        margin-bottom: 18px;
+    }
+    .scan-kicker {
+        margin: 0;
+        color: #8b949e;
+        text-transform: uppercase;
+        letter-spacing: 1.3px;
+        font-size: 0.75rem;
+        font-weight: 700;
+    }
+    .scan-title {
+        margin: 10px 0 8px 0;
+        color: #f0f6fc;
+        font-size: 1.85rem;
+        font-weight: 760;
+        letter-spacing: 0.15px;
+        line-height: 1.22;
+    }
+    .scan-subtitle {
+        margin: 0;
+        color: #9aa4af;
+        font-size: 0.98rem;
+        line-height: 1.6;
+    }
+    div[data-testid="stAlert"] {
+        transition: all 0.24s ease-in-out;
+        border-radius: 14px;
+        border: 1px solid #30363d !important;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+    }
+    div[data-testid="stAlert"]:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 14px 28px rgba(0,0,0,0.34);
+    }
+    div[data-testid="column"] div[data-testid="stMarkdownContainer"] h3 {
+        color: #f0f6fc;
+        font-size: 1.05rem;
+        letter-spacing: 0.2px;
+        margin-bottom: 6px;
+    }
+    div[data-testid="stButton"] > button {
+        border-radius: 12px !important;
+        min-height: 46px !important;
+        font-weight: 700 !important;
+    }
+    div[data-testid="stButton"] > button[kind="primary"] {
+        background: linear-gradient(90deg, #00ffcc 0%, #00d8af 100%) !important;
+        color: #052019 !important;
+        border: none !important;
+        box-shadow: 0 10px 22px rgba(0,255,204,0.22);
+    }
+    div[data-testid="stDataFrame"] {
+        border: 1px solid #30363d;
+        border-radius: 14px;
+        overflow: hidden;
+        box-shadow: 0 10px 24px rgba(0,0,0,0.22);
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # --- Perfil: si aún no se cargó desde Supabase, reconciliar (incl. auto-provisioning) ---
+    if st.session_state.get("email_usuario") and not st.session_state.get("datos_cliente_cargados"):
+        cargar_perfil_usuario(st.session_state["email_usuario"])
+    if 'trial_pro_usada' not in st.session_state:
+        st.session_state.trial_pro_usada = False
+
+    st.markdown("""
+        <div class="scan-hero">
+            <p class="scan-kicker">Pricing Intelligence</p>
+            <h2 class="scan-title">Motores de Auditoría y Tarifas</h2>
+            <p class="scan-subtitle">Compare capacidades técnicas, impacto operativo y modalidad de contratación para elegir el nivel de auditoría adecuado para su organización.</p>
+        </div>
+    """, unsafe_allow_html=True)
+
+    col_e1, col_e2, col_e3 = st.columns(3)
+
+    # --- COLUMNA 1: BASIC ---
+    with col_e1:
+        st.markdown("###  Escaneo Pasivo")
+        st.markdown("<h4 style='color: #60b4ff;'>Plan Basic (Gratis)</h4>", unsafe_allow_html=True)
+        st.info("""
+        **Tecnología Zero-Touch (Sin rastro):**
+        - **Headers de Seguridad: Análisis de 6 cabeceras HTTP críticas (HSTS, CSP, X-Frame-Options y más).
+        - **DNS & SSL:** Análisis de registros y caducidad de certificados.
+        - **Reputación IP:** Comprobación en listas negras globales.
+        - **CDN:** Detección de protección mediante Cloudflare y otros CDNs.
+
+        **Límites de la cuenta Gratis:**
+        - 🎯 **Objetivos:** Máximo 3 dominios/mes.
+        - ⏳ **Historial:** Sin retención de datos.
+        - 📑 **Reportes:** Resumen básico sin remediación.
+
+        **Impacto:** 0%. Totalmente invisible para tus sistemas.
+        """)
+
+        if st.session_state.get('plan_activo', 'Basic') == 'Basic':
+            st.button("✅ Plan Actual (Activo)", disabled=True, use_container_width=True, key="btn_basic_active")
+        else:
+            if st.button("Bajar al Plan Basic", use_container_width=True, key="btn_basic_downgrade"):
+                email_actual = st.session_state.get('email_usuario')
+                if _cambiar_renovacion(True):
+                    st.rerun()
+
+    # --- COLUMNA 2: PRO ---
+    with col_e2:
+        st.markdown("###  Escaneo Activo")
+        st.markdown("<h4 style='color: #FFBD45;'>Plan Pro (65€ / mes)</h4>", unsafe_allow_html=True)
+        st.warning("""
+        **Tecnología Intrusiva (Activa):**
+        - **Port & Banner:** Mapeo de puertos y detección del software exacto.
+        - **Fuzzing Web:** Búsqueda por fuerza bruta de directorios ocultos.
+        - **CVE Matching:** Cruce automático de hallazgos con bases de datos.
+        - **SSL/TLS Profundo:** Análisis de cipher suites, protocolos obsoletos (TLS 1.0/1.1) y firma SHA-1.
+        - **Ficheros Críticos:** Detección de archivos sensibles expuestos (.env, .git, backups, configs).
+        - **OSINT Emails:** Búsqueda de emails corporativos expuestos públicamente.
+        - **Fingerprinting:** Identificación de tecnologías, CMS, frameworks y CDN.
+        - **Subdominios:** Enumeración de subdominios expuestos incluyendo entornos dev/staging.
+
+        **Ventajas de la cuenta Pro:**
+        - 🎯 **Objetivos:** Hasta 25 dominios o IPs al mes.
+        - ⏳ **Historial:** Retención de 1 año.
+        - 📑 **Reportes:** Nivel técnico con código de remediación (Fixes).
+        - ⚡ **Rendimiento:** Prioridad Alta en la cola de escaneo.
+
+        **Impacto:** Medio. Generará ruido y quedará registrado en Firewalls.
+        """)
+
+        if st.session_state.get('plan_activo', 'Basic') == 'Pro':
+            st.button("✅ Plan Actual (Activo)", disabled=True, use_container_width=True, key="btn_pro_active")
+        else:
+            email_pago = st.session_state.get("email_usuario", "")
+            usuario_logueado = bool(st.session_state.get("usuario_autenticado")) and bool(email_pago)
+# 1. Botón de Suscripción Principal (o prueba gratuita)
+            st.caption("Las pruebas gratuitas requieren configuracion en Stripe; puedes contratar el plan con el pago seguro.")
+            if usuario_logueado:
+                _purchase_button(STRIPE_PRICES['pro_recurrente'], email_pago, 'pro_recurrente', 'subscription', ' Suscribirse (65€/mes)', 'purchase_2941', type='primary', use_container_width=True)
+            else:
+                st.info("Inicia sesión para habilitar el pago.")
+
+            # 2. Botón de Venta Única (Downselling)
+            st.markdown("<p style='text-align: center; color: #888; font-size: 0.8rem; margin: 5px 0;'>— O PAGO POR USO —</p>", unsafe_allow_html=True)
+            if usuario_logueado:
+                _purchase_button(STRIPE_PRICES['pro_unico'], email_pago, 'pro_unico', 'payment', ' Comprar Escaneo Único (39€)', 'purchase_2954', use_container_width=True)
+            else:
+                st.info("Inicia sesión para habilitar el pago.")
+
+    # --- COLUMNA 3: ENTERPRISE ---
+    with col_e3:
+        st.markdown("###  Auditoría OWASP")
+        st.markdown("<h4 style='color: #FF4B4B;'>Enterprise (219€ / mes)</h4>", unsafe_allow_html=True)
+        st.error("""
+        **Simulación de ataque (Red Team automatizado):**
+        - **Inyecciones reales:** Pruebas activas de SQLi y XSS con múltiples payloads verificados, confirmando que el servidor no los sanitiza
+        - **Detección de WAF:** Identificación del proveedor de firewall (Cloudflare, Akamai, Sucuri, Imperva)
+        - **APIs expuestas:** Verificación de endpoints con análisis de CORS y datos sin autenticación
+        - **Subdomain Takeover:** Enumeración y análisis de subdominios expuestos contra servicios vulnerables conocidos (GitHub Pages, Heroku, AWS, Netlify, Vercel y más)
+        - **Fugas en código:** Análisis de HTML y JavaScript externo buscando tokens, API keys, credenciales y rutas internas
+        - **Cookies y sesiones:** Verificación de flags Secure, HttpOnly y SameSite
+        - **Rate Limiting:** Prueba real de protección contra fuerza bruta en endpoints de login
+        - **Métodos HTTP peligrosos:** Detección de PUT, DELETE y TRACE habilitados
+        - **Cabeceras avanzadas:** Análisis profundo de COEP, COOP, CORP y Content Security Policy, detectando configuraciones débiles o ausentes
+
+        **Ventajas de la cuenta Enterprise:**
+        - 🎯 **Objetivos:** Dominios e IPs ilimitados.
+        - 🧠 **Monitoreo:** 100% automatizado por bots.
+        - 🔔 **Integraciones:** Alertas a Slack/Teams y Webhooks.
+        - 📑 **Reportes:** API Access total para tu propio software.
+
+        **Impacto:** Alto. Puede provocar ralentizaciones y alertas críticas.
+        """)
+
+        if st.session_state.get('plan_activo', 'Basic') == 'Enterprise':
+            st.button("✅ Plan Actual (Activo)", disabled=True, use_container_width=True, key="btn_ent_active")
+        else:
+            email_pago = st.session_state.get("email_usuario", "")
+            usuario_logueado = bool(st.session_state.get("usuario_autenticado")) and bool(email_pago)
+            # 1. Botón de Suscripción Principal
+            if usuario_logueado:
+                _purchase_button(STRIPE_PRICES['enterprise_recurrente'], email_pago, 'enterprise_recurrente', 'subscription', ' Suscribirse (219€/mes)', 'purchase_2996', type='primary', use_container_width=True)
+            else:
+                st.info("Inicia sesión para habilitar el pago.")
+
+            # 2. Botón de Venta Única (Downselling)
+            st.markdown("<p style='text-align: center; color: #888; font-size: 0.8rem; margin: 5px 0;'>— O PAGO POR USO —</p>", unsafe_allow_html=True)
+            if usuario_logueado:
+                _purchase_button(STRIPE_PRICES['enterprise_unico'], email_pago, 'enterprise_unico', 'payment', ' Comprar Escaneo Único (139€)', 'purchase_3009', use_container_width=True)
+            else:
+                st.info("Inicia sesión para habilitar el pago.")
+
+    # A PDF credit can be purchased before a scan exists; consumption stays in the PDF RPC.
+    if st.session_state.get("plan_activo", "Basic") == "Basic" and st.session_state.get("usuario_autenticado"):
+        pdf_en = st.session_state.get("_vs_lang", "es") == "en"
+        st.markdown("#### PDF report credit" if pdf_en else "#### Crédito para informe PDF")
+        st.caption("Buy 1 PDF credit to unlock a saved report. No scan is included; this purchase does not download a report."
+                   if pdf_en else "Compra 1 crédito PDF para desbloquear un informe guardado. No incluye un escaneo ni descarga un informe.")
+        _purchase_button(STRIPE_PRICES['pdf_unico'], st.session_state.get("email_usuario", ""),
+                         'pdf_unico', 'payment',
+                         "Buy 1 PDF credit (9.99 EUR)" if pdf_en else "Comprar 1 crédito PDF (9,99 EUR)",
+                         'purchase_pdf_credit_standalone', use_container_width=True)
+
+    st.markdown("---")
+    st.markdown("<br>", unsafe_allow_html=True)
+
+
+# ==========================================
+# PESTAÑA 3: REPORTES (Archivo y Descargas)
+# ==========================================
+with menu_reportes, measure_panel("reports"):
+    st.markdown("""
+    <style>
+        .reports-hero {
+            background: radial-gradient(1100px 280px at -5% -30%, rgba(96,180,255,0.13), transparent 50%),
+                        radial-gradient(900px 240px at 105% -20%, rgba(0,255,204,0.10), transparent 45%),
                         linear-gradient(180deg, #171d26 0%, #121820 100%);
             border: 1px solid #30363d;
             border-radius: 16px;
             padding: 24px 24px 20px 24px;
-            margin-bottom: 18px;
+            margin-bottom: 16px;
+            box-shadow: 0 12px 28px rgba(0,0,0,0.26);
         }
-        .scan-kicker {
+        .reports-kicker {
             margin: 0;
             color: #8b949e;
             text-transform: uppercase;
@@ -2869,880 +3085,657 @@ if menu_escaneos.open:
             font-size: 0.75rem;
             font-weight: 700;
         }
-        .scan-title {
+        .reports-title {
             margin: 10px 0 8px 0;
             color: #f0f6fc;
-            font-size: 1.85rem;
+            font-size: 1.9rem;
             font-weight: 760;
-            letter-spacing: 0.15px;
-            line-height: 1.22;
+            letter-spacing: 0.2px;
+            line-height: 1.2;
         }
-        .scan-subtitle {
+        .reports-subtitle {
             margin: 0;
             color: #9aa4af;
-            font-size: 0.98rem;
+            font-size: 1rem;
             line-height: 1.6;
+            max-width: 850px;
         }
-        div[data-testid="stAlert"] {
-            transition: all 0.24s ease-in-out;
-            border-radius: 14px;
+        .reports-filter-title {
+            margin: 0 0 10px 0;
+            color: #d0d7de;
+            font-size: 0.95rem;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+            text-transform: uppercase;
+        }
+        div[data-testid="stSelectbox"] > div[data-baseweb="select"] > div {
+            background: #0f141b !important;
             border: 1px solid #30363d !important;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+            border-radius: 12px !important;
         }
-        div[data-testid="stAlert"]:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 14px 28px rgba(0,0,0,0.34);
+        div[data-testid="stSelectbox"] > div[data-baseweb="select"] > div:hover {
+            border-color: #4a5563 !important;
         }
-        div[data-testid="column"] div[data-testid="stMarkdownContainer"] h3 {
+        .reports-section-title {
+            margin: 0;
             color: #f0f6fc;
-            font-size: 1.05rem;
+            font-size: 1.2rem;
             letter-spacing: 0.2px;
-            margin-bottom: 6px;
+            font-weight: 700;
+        }
+        .reports-section-sub {
+            margin: 6px 0 12px 0;
+            color: #8b949e;
+            font-size: 0.95rem;
+        }
+        .report-item {
+            background: linear-gradient(180deg, #161b22 0%, #121820 100%);
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 14px 14px 10px 14px;
+            margin-bottom: 8px;
+            box-shadow: 0 8px 22px rgba(0,0,0,0.22);
+        }
+        .report-divider {
+            margin: 0.45em 0 0.65em 0;
+            border: 0.5px solid #2b323d;
         }
         div[data-testid="stButton"] > button {
             border-radius: 12px !important;
-            min-height: 46px !important;
+            min-height: 45px !important;
             font-weight: 700 !important;
         }
         div[data-testid="stButton"] > button[kind="primary"] {
             background: linear-gradient(90deg, #00ffcc 0%, #00d8af 100%) !important;
-            color: #052019 !important;
+            color: #06221a !important;
             border: none !important;
             box-shadow: 0 10px 22px rgba(0,255,204,0.22);
         }
-        div[data-testid="stDataFrame"] {
-            border: 1px solid #30363d;
-            border-radius: 14px;
-            overflow: hidden;
-            box-shadow: 0 10px 24px rgba(0,0,0,0.22);
-        }
-        </style>
-        """, unsafe_allow_html=True)
+    </style>
+    """, unsafe_allow_html=True)
 
-        # --- Perfil: si aún no se cargó desde Supabase, reconciliar (incl. auto-provisioning) ---
-        if st.session_state.get("email_usuario") and not st.session_state.get("datos_cliente_cargados"):
-            cargar_perfil_usuario(st.session_state["email_usuario"])
-        if 'trial_pro_usada' not in st.session_state:
-            st.session_state.trial_pro_usada = False
+    st.markdown("""
+        <div class="reports-hero">
+            <p class="reports-kicker">Executive Reporting Center</p>
+            <h2 class="reports-title">Archivo Histórico de Reportes</h2>
+            <p class="reports-subtitle">Consulta, filtra y descarga informes de auditoría con una experiencia visual orientada a dirección, compliance y comité ejecutivo.</p>
+        </div>
+    """, unsafe_allow_html=True)
 
-        st.markdown("""
-            <div class="scan-hero">
-                <p class="scan-kicker">Pricing Intelligence</p>
-                <h2 class="scan-title">Motores de Auditoría y Tarifas</h2>
-                <p class="scan-subtitle">Compare capacidades técnicas, impacto operativo y modalidad de contratación para elegir el nivel de auditoría adecuado para su organización.</p>
-            </div>
-        """, unsafe_allow_html=True)
+# --- 0. CONEXIÓN REAL A LA BASE DE DATOS ---
+    email_usuario = st.session_state.get('email_usuario', '')
+    try:
+        with measure_panel("history_read"):
+            respuesta = supabase.table("escaneos").select("*").eq("email_cliente", email_usuario).execute()
+        historial_real = list(reversed(respuesta.data))
+    except Exception as e:
+        historial_real = []
 
-        col_e1, col_e2, col_e3 = st.columns(3)
+    # --- 1. SECCIÓN DE FILTROS (FUNCIONALES) ---
+    st.markdown("<p class='reports-filter-title'>Filtros de búsqueda</p>", unsafe_allow_html=True)
+    col_f1, col_f2, col_f3 = st.columns(3)
 
-        # --- COLUMNA 1: BASIC ---
-        with col_e1:
-            st.markdown("###  Escaneo Pasivo")
-            st.markdown("<h4 style='color: #60b4ff;'>Plan Basic (Gratis)</h4>", unsafe_allow_html=True)
-            st.info("""
-            **Tecnología Zero-Touch (Sin rastro):**
-            - **Headers de Seguridad: Análisis de 6 cabeceras HTTP críticas (HSTS, CSP, X-Frame-Options y más).
-            - **DNS & SSL:** Análisis de registros y caducidad de certificados.
-            - **Reputación IP:** Comprobación en listas negras globales.
-            - **CDN:** Detección de protección mediante Cloudflare y otros CDNs.
+    with col_f1:
+        f_dominio = st.text_input("Dominio Auditado", placeholder="Ej: google.com", label_visibility="collapsed")
+    with col_f2:
+        f_fecha = st.text_input("Fecha del Escaneo", placeholder="Ej: Mayo 2026 o 05/2026", label_visibility="collapsed")
+    with col_f3:
+        f_riesgo = st.selectbox("Nivel de Riesgo", ["Todos", "Critico", "Moderado", "Optimo"], label_visibility="collapsed")
 
-            **Límites de la cuenta Gratis:**
-            - 🎯 **Objetivos:** Máximo 3 dominios/mes.
-            - ⏳ **Historial:** Sin retención de datos.
-            - 📑 **Reportes:** Resumen básico sin remediación.
+    st.markdown("---")
 
-            **Impacto:** 0%. Totalmente invisible para tus sistemas.
-            """)
+    # --- 2. LÓGICA DE FILTRADO ---
+    historial_filtrado = historial_real
 
-            if st.session_state.get('plan_activo', 'Basic') == 'Basic':
-                st.button("✅ Plan Actual (Activo)", disabled=True, use_container_width=True, key="btn_basic_active")
-            else:
-                if st.button("Bajar al Plan Basic", use_container_width=True, key="btn_basic_downgrade"):
-                    email_actual = st.session_state.get('email_usuario')
-                    if _cambiar_renovacion(True):
-                        st.rerun()
+    if f_dominio:
+        historial_filtrado = [r for r in historial_filtrado if f_dominio.lower() in r.get('dominio', '').lower()]
+    if f_fecha:
+        historial_filtrado = [r for r in historial_filtrado if f_fecha.lower() in r.get('fecha', '').lower() or f_fecha.lower() in r.get('created_at', '').lower()]
+    if f_riesgo != "Todos":
+        historial_filtrado = [r for r in historial_filtrado if f_riesgo.lower() in r.get('riesgo', '').lower()]
 
-        # --- COLUMNA 2: PRO ---
-        with col_e2:
-            st.markdown("###  Escaneo Activo")
-            st.markdown("<h4 style='color: #FFBD45;'>Plan Pro (65€ / mes)</h4>", unsafe_allow_html=True)
-            st.warning("""
-            **Tecnología Intrusiva (Activa):**
-            - **Port & Banner:** Mapeo de puertos y detección del software exacto.
-            - **Fuzzing Web:** Búsqueda por fuerza bruta de directorios ocultos.
-            - **CVE Matching:** Cruce automático de hallazgos con bases de datos.
-            - **SSL/TLS Profundo:** Análisis de cipher suites, protocolos obsoletos (TLS 1.0/1.1) y firma SHA-1.
-            - **Ficheros Críticos:** Detección de archivos sensibles expuestos (.env, .git, backups, configs).
-            - **OSINT Emails:** Búsqueda de emails corporativos expuestos públicamente.
-            - **Fingerprinting:** Identificación de tecnologías, CMS, frameworks y CDN.
-            - **Subdominios:** Enumeración de subdominios expuestos incluyendo entornos dev/staging.
+    # --- 3. MOSTRAR DOCUMENTOS ---
+    st.markdown("<h3 class='reports-section-title'>Documentos Disponibles</h3>", unsafe_allow_html=True)
+    st.markdown("<p class='reports-section-sub'>Descarga los reportes ejecutivos para presentar a tu junta directiva.</p>", unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
 
-            **Ventajas de la cuenta Pro:**
-            - 🎯 **Objetivos:** Hasta 25 dominios o IPs al mes.
-            - ⏳ **Historial:** Retención de 1 año.
-            - 📑 **Reportes:** Nivel técnico con código de remediación (Fixes).
-            - ⚡ **Rendimiento:** Prioridad Alta en la cola de escaneo.
+    if len(historial_real) == 0:
+        st.info("📊 Aún no has realizado ningún escaneo. Ve al **Dashboard** para analizar tu primer dominio.")
+    elif len(historial_filtrado) == 0:
+        st.info("🔍 No se han encontrado reportes que coincidan con los filtros.")
+    else:
+        sub_tab_recientes, sub_tab_todos = st.tabs(["⚡ Resultados Filtrados", "📂 Historial Completo"], on_change="ignore")
 
-            **Impacto:** Medio. Generará ruido y quedará registrado en Firewalls.
-            """)
+        def pintar_reporte(rep, index, sufijo):
+            dominio = rep.get('dominio', 'Desconocido')
+            tipo = rep.get('tipo', 'Auditoría')
+            fecha = rep.get('fecha', 'Hoy')
+            riesgo = rep.get('riesgo', 'Medio')
+            plan_rep = st.session_state.get('plan_activo', 'Basic')
 
-            if st.session_state.get('plan_activo', 'Basic') == 'Pro':
-                st.button("✅ Plan Actual (Activo)", disabled=True, use_container_width=True, key="btn_pro_active")
-            else:
-                email_pago = st.session_state.get("email_usuario", "")
-                usuario_logueado = bool(st.session_state.get("usuario_autenticado")) and bool(email_pago)
-    # 1. Botón de Suscripción Principal (o prueba gratuita)
-                st.caption("Las pruebas gratuitas requieren configuracion en Stripe; puedes contratar el plan con el pago seguro.")
-                if usuario_logueado:
-                    _purchase_button(STRIPE_PRICES['pro_recurrente'], email_pago, 'pro_recurrente', 'subscription', ' Suscribirse (65€/mes)', 'purchase_2941', type='primary', use_container_width=True)
-                else:
-                    st.info("Inicia sesión para habilitar el pago.")
+            with st.container():
+                st.markdown("<div class='report-item'>", unsafe_allow_html=True)
+                rc1, rc2 = st.columns([4, 2])
+                with rc1:
+                    st.markdown(f"**{dominio}** - {tipo}")
+                    st.caption(f"📅 Fecha: {fecha} | Nivel de Riesgo: {riesgo}")
+                with rc2:
+                        plan_rep = st.session_state.get("plan_activo", "Basic")
+                        tokens_pdf = st.session_state.get("tokens_pdf", 0)
+                        email_pago = st.session_state.get("email_usuario", "")
 
-                # 2. Botón de Venta Única (Downselling)
-                st.markdown("<p style='text-align: center; color: #888; font-size: 0.8rem; margin: 5px 0;'>— O PAGO POR USO —</p>", unsafe_allow_html=True)
-                if usuario_logueado:
-                    _purchase_button(STRIPE_PRICES['pro_unico'], email_pago, 'pro_unico', 'payment', ' Comprar Escaneo Único (39€)', 'purchase_2954', use_container_width=True)
-                else:
-                    st.info("Inicia sesión para habilitar el pago.")
+                        reporte_id = str(rep.get('id', f"{dominio}_{fecha}_{index}"))
+                        token_usado_key = f"token_usado_{reporte_id}"
 
-        # --- COLUMNA 3: ENTERPRISE ---
-        with col_e3:
-            st.markdown("###  Auditoría OWASP")
-            st.markdown("<h4 style='color: #FF4B4B;'>Enterprise (219€ / mes)</h4>", unsafe_allow_html=True)
-            st.error("""
-            **Simulación de ataque (Red Team automatizado):**
-            - **Inyecciones reales:** Pruebas activas de SQLi y XSS con múltiples payloads verificados, confirmando que el servidor no los sanitiza
-            - **Detección de WAF:** Identificación del proveedor de firewall (Cloudflare, Akamai, Sucuri, Imperva)
-            - **APIs expuestas:** Verificación de endpoints con análisis de CORS y datos sin autenticación
-            - **Subdomain Takeover:** Enumeración y análisis de subdominios expuestos contra servicios vulnerables conocidos (GitHub Pages, Heroku, AWS, Netlify, Vercel y más)
-            - **Fugas en código:** Análisis de HTML y JavaScript externo buscando tokens, API keys, credenciales y rutas internas
-            - **Cookies y sesiones:** Verificación de flags Secure, HttpOnly y SameSite
-            - **Rate Limiting:** Prueba real de protección contra fuerza bruta en endpoints de login
-            - **Métodos HTTP peligrosos:** Detección de PUT, DELETE y TRACE habilitados
-            - **Cabeceras avanzadas:** Análisis profundo de COEP, COOP, CORP y Content Security Policy, detectando configuraciones débiles o ausentes
+                        reporte_desbloqueado = st.session_state.get("reporte_pdf_desbloqueado", None)
+                        if plan_rep in ['Pro', 'Enterprise'] or tokens_pdf > 0 or _pdf_desbloqueado_servidor(reporte_id):
+                            resultados_rep = _normalizar_lineas_resultado(
+                                rep.get("resultados") or rep.get("resultados_json")
+                            )
+                            resultados_rep = [r.replace('\u2192', '->').replace('\u2014', '-').replace('\u2013', '-') for r in resultados_rep]
+                            if not resultados_rep:
+                                resultados_rep = [f"✅ Dominio analizado: {dominio}", f"📅 Fecha: {fecha}", f"⚠️ Nivel de riesgo: {riesgo}"]
+                            resultados_rep_limpios = [r.replace('\U0001f7e1', '').replace('\U0001f7e0', '').replace('\U0001f534', '').replace('\U0001f7e2', '').replace('\u26aa', '') if isinstance(r, str) else r for r in resultados_rep]
+                            try:
+                                pdf_bytes = crear_pdf(dominio, resultados_rep_limpios)
+                            except Exception as error:
+                                log_panel_failure("reports_pdf", error)
+                                st.warning("No se pudo preparar este informe. Los demás apartados siguen disponibles.")
+                                return
+                            if _descargar_pdf_seguro(
+                                report_id=reporte_id,
+                                label="📄 Descargar Reporte PDF",
+                                data=pdf_bytes,
+                                file_name=f"reporte_{dominio}.pdf",
+                                mime="application/pdf",
+                                key=f"dl_pdf_{sufijo}_{index}",
+                                use_container_width=True,
+                                type="primary"
+                            ):
+                                pass  # Consumo autorizado por RPC antes de servir el PDF.
+                        else:
+                            if st.button("📄 Descargar Reporte PDF", key=f"btn_pdf_{sufijo}_{index}", use_container_width=True):
+                                st.session_state[f"mostrar_upsell_{sufijo}_{index}"] = True
+                            if st.session_state.get(f"mostrar_upsell_{sufijo}_{index}"):
+                                st.warning("🔒 Para descargar el reporte PDF necesitas el **Plan Pro** o **Enterprise**, también puedes comprarlo por **9,99€**.")
+                                _purchase_button(STRIPE_PRICES['pdf_unico'], email_pago, 'pdf_unico', 'payment', '🛒 Comprar por 9,99€', 'purchase_3219', use_container_width=True)
+                st.markdown("</div>", unsafe_allow_html=True)
 
-            **Ventajas de la cuenta Enterprise:**
-            - 🎯 **Objetivos:** Dominios e IPs ilimitados.
-            - 🧠 **Monitoreo:** 100% automatizado por bots.
-            - 🔔 **Integraciones:** Alertas a Slack/Teams y Webhooks.
-            - 📑 **Reportes:** API Access total para tu propio software.
+        with sub_tab_recientes:
+            for i, rep in enumerate(historial_filtrado[:5]):
+                pintar_reporte(rep, i, "filtro")
 
-            **Impacto:** Alto. Puede provocar ralentizaciones y alertas críticas.
-            """)
+        with sub_tab_todos:
+            with st.container(height=400):
+                for i, rep in enumerate(historial_filtrado):
+                    pintar_reporte(rep, i, "todos")
+                    st.markdown("---")
 
-            if st.session_state.get('plan_activo', 'Basic') == 'Enterprise':
-                st.button("✅ Plan Actual (Activo)", disabled=True, use_container_width=True, key="btn_ent_active")
-            else:
-                email_pago = st.session_state.get("email_usuario", "")
-                usuario_logueado = bool(st.session_state.get("usuario_autenticado")) and bool(email_pago)
-                # 1. Botón de Suscripción Principal
-                if usuario_logueado:
-                    _purchase_button(STRIPE_PRICES['enterprise_recurrente'], email_pago, 'enterprise_recurrente', 'subscription', ' Suscribirse (219€/mes)', 'purchase_2996', type='primary', use_container_width=True)
-                else:
-                    st.info("Inicia sesión para habilitar el pago.")
-
-                # 2. Botón de Venta Única (Downselling)
-                st.markdown("<p style='text-align: center; color: #888; font-size: 0.8rem; margin: 5px 0;'>— O PAGO POR USO —</p>", unsafe_allow_html=True)
-                if usuario_logueado:
-                    _purchase_button(STRIPE_PRICES['enterprise_unico'], email_pago, 'enterprise_unico', 'payment', ' Comprar Escaneo Único (139€)', 'purchase_3009', use_container_width=True)
-                else:
-                    st.info("Inicia sesión para habilitar el pago.")
-
-        # A PDF credit can be purchased before a scan exists; consumption stays in the PDF RPC.
-        if st.session_state.get("plan_activo", "Basic") == "Basic" and st.session_state.get("usuario_autenticado"):
-            pdf_en = st.session_state.get("_vs_lang", "es") == "en"
-            st.markdown("#### PDF report credit" if pdf_en else "#### Crédito para informe PDF")
-            st.caption("Buy 1 PDF credit to unlock a saved report. No scan is included; this purchase does not download a report."
-                       if pdf_en else "Compra 1 crédito PDF para desbloquear un informe guardado. No incluye un escaneo ni descarga un informe.")
-            _purchase_button(STRIPE_PRICES['pdf_unico'], st.session_state.get("email_usuario", ""),
-                             'pdf_unico', 'payment',
-                             "Buy 1 PDF credit (9.99 EUR)" if pdf_en else "Comprar 1 crédito PDF (9,99 EUR)",
-                             'purchase_pdf_credit_standalone', use_container_width=True)
-
-        st.markdown("---")
-        st.markdown("<br>", unsafe_allow_html=True)
-
-
-# ==========================================
-# PESTAÑA 3: REPORTES (Archivo y Descargas)
-# ==========================================
-if menu_reportes.open:
-    with menu_reportes, measure_panel("reports"):
-        st.markdown("""
-        <style>
-            .reports-hero {
-                background: radial-gradient(1100px 280px at -5% -30%, rgba(96,180,255,0.13), transparent 50%),
-                            radial-gradient(900px 240px at 105% -20%, rgba(0,255,204,0.10), transparent 45%),
-                            linear-gradient(180deg, #171d26 0%, #121820 100%);
-                border: 1px solid #30363d;
-                border-radius: 16px;
-                padding: 24px 24px 20px 24px;
-                margin-bottom: 16px;
-                box-shadow: 0 12px 28px rgba(0,0,0,0.26);
-            }
-            .reports-kicker {
-                margin: 0;
-                color: #8b949e;
-                text-transform: uppercase;
-                letter-spacing: 1.3px;
-                font-size: 0.75rem;
-                font-weight: 700;
-            }
-            .reports-title {
-                margin: 10px 0 8px 0;
-                color: #f0f6fc;
-                font-size: 1.9rem;
-                font-weight: 760;
-                letter-spacing: 0.2px;
-                line-height: 1.2;
-            }
-            .reports-subtitle {
-                margin: 0;
-                color: #9aa4af;
-                font-size: 1rem;
-                line-height: 1.6;
-                max-width: 850px;
-            }
-            .reports-filter-title {
-                margin: 0 0 10px 0;
-                color: #d0d7de;
-                font-size: 0.95rem;
-                font-weight: 700;
-                letter-spacing: 0.3px;
-                text-transform: uppercase;
-            }
-            div[data-testid="stSelectbox"] > div[data-baseweb="select"] > div {
-                background: #0f141b !important;
-                border: 1px solid #30363d !important;
-                border-radius: 12px !important;
-            }
-            div[data-testid="stSelectbox"] > div[data-baseweb="select"] > div:hover {
-                border-color: #4a5563 !important;
-            }
-            .reports-section-title {
-                margin: 0;
-                color: #f0f6fc;
-                font-size: 1.2rem;
-                letter-spacing: 0.2px;
-                font-weight: 700;
-            }
-            .reports-section-sub {
-                margin: 6px 0 12px 0;
-                color: #8b949e;
-                font-size: 0.95rem;
-            }
-            .report-item {
-                background: linear-gradient(180deg, #161b22 0%, #121820 100%);
-                border: 1px solid #30363d;
-                border-radius: 12px;
-                padding: 14px 14px 10px 14px;
-                margin-bottom: 8px;
-                box-shadow: 0 8px 22px rgba(0,0,0,0.22);
-            }
-            .report-divider {
-                margin: 0.45em 0 0.65em 0;
-                border: 0.5px solid #2b323d;
-            }
-            div[data-testid="stButton"] > button {
-                border-radius: 12px !important;
-                min-height: 45px !important;
-                font-weight: 700 !important;
-            }
-            div[data-testid="stButton"] > button[kind="primary"] {
-                background: linear-gradient(90deg, #00ffcc 0%, #00d8af 100%) !important;
-                color: #06221a !important;
-                border: none !important;
-                box-shadow: 0 10px 22px rgba(0,255,204,0.22);
-            }
-        </style>
-        """, unsafe_allow_html=True)
-
-        st.markdown("""
-            <div class="reports-hero">
-                <p class="reports-kicker">Executive Reporting Center</p>
-                <h2 class="reports-title">Archivo Histórico de Reportes</h2>
-                <p class="reports-subtitle">Consulta, filtra y descarga informes de auditoría con una experiencia visual orientada a dirección, compliance y comité ejecutivo.</p>
-            </div>
-        """, unsafe_allow_html=True)
-
-    # --- 0. CONEXIÓN REAL A LA BASE DE DATOS ---
-        email_usuario = st.session_state.get('email_usuario', '')
-        try:
-            with measure_panel("history_read"):
-                respuesta = supabase.table("escaneos").select("*").eq("email_cliente", email_usuario).execute()
-            historial_real = list(reversed(respuesta.data))
-        except Exception as e:
-            historial_real = []
-
-        # --- 1. SECCIÓN DE FILTROS (FUNCIONALES) ---
-        st.markdown("<p class='reports-filter-title'>Filtros de búsqueda</p>", unsafe_allow_html=True)
-        col_f1, col_f2, col_f3 = st.columns(3)
-
-        with col_f1:
-            f_dominio = st.text_input("Dominio Auditado", placeholder="Ej: google.com", label_visibility="collapsed")
-        with col_f2:
-            f_fecha = st.text_input("Fecha del Escaneo", placeholder="Ej: Mayo 2026 o 05/2026", label_visibility="collapsed")
-        with col_f3:
-            f_riesgo = st.selectbox("Nivel de Riesgo", ["Todos", "Critico", "Moderado", "Optimo"], label_visibility="collapsed")
-
-        st.markdown("---")
-
-        # --- 2. LÓGICA DE FILTRADO ---
-        historial_filtrado = historial_real
-
-        if f_dominio:
-            historial_filtrado = [r for r in historial_filtrado if f_dominio.lower() in r.get('dominio', '').lower()]
-        if f_fecha:
-            historial_filtrado = [r for r in historial_filtrado if f_fecha.lower() in r.get('fecha', '').lower() or f_fecha.lower() in r.get('created_at', '').lower()]
-        if f_riesgo != "Todos":
-            historial_filtrado = [r for r in historial_filtrado if f_riesgo.lower() in r.get('riesgo', '').lower()]
-
-        # --- 3. MOSTRAR DOCUMENTOS ---
-        st.markdown("<h3 class='reports-section-title'>Documentos Disponibles</h3>", unsafe_allow_html=True)
-        st.markdown("<p class='reports-section-sub'>Descarga los reportes ejecutivos para presentar a tu junta directiva.</p>", unsafe_allow_html=True)
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        if len(historial_real) == 0:
-            st.info("📊 Aún no has realizado ningún escaneo. Ve al **Dashboard** para analizar tu primer dominio.")
-        elif len(historial_filtrado) == 0:
-            st.info("🔍 No se han encontrado reportes que coincidan con los filtros.")
-        else:
-            sub_tab_recientes, sub_tab_todos = st.tabs(["⚡ Resultados Filtrados", "📂 Historial Completo"], key="_panel_report_list", on_change="rerun")
-
-            def pintar_reporte(rep, index, sufijo):
-                dominio = rep.get('dominio', 'Desconocido')
-                tipo = rep.get('tipo', 'Auditoría')
-                fecha = rep.get('fecha', 'Hoy')
-                riesgo = rep.get('riesgo', 'Medio')
-                plan_rep = st.session_state.get('plan_activo', 'Basic')
-
-                with st.container():
-                    st.markdown("<div class='report-item'>", unsafe_allow_html=True)
-                    rc1, rc2 = st.columns([4, 2])
-                    with rc1:
-                        st.markdown(f"**{dominio}** - {tipo}")
-                        st.caption(f"📅 Fecha: {fecha} | Nivel de Riesgo: {riesgo}")
-                    with rc2:
-                            plan_rep = st.session_state.get("plan_activo", "Basic")
-                            tokens_pdf = st.session_state.get("tokens_pdf", 0)
-                            email_pago = st.session_state.get("email_usuario", "")
-
-                            reporte_id = str(rep.get('id', f"{dominio}_{fecha}_{index}"))
-                            token_usado_key = f"token_usado_{reporte_id}"
-
-                            reporte_desbloqueado = st.session_state.get("reporte_pdf_desbloqueado", None)
-                            if plan_rep in ['Pro', 'Enterprise'] or tokens_pdf > 0 or _pdf_desbloqueado_servidor(reporte_id):
-                                resultados_rep = _normalizar_lineas_resultado(
-                                    rep.get("resultados") or rep.get("resultados_json")
-                                )
-                                resultados_rep = [r.replace('\u2192', '->').replace('\u2014', '-').replace('\u2013', '-') for r in resultados_rep]
-                                if not resultados_rep:
-                                    resultados_rep = [f"✅ Dominio analizado: {dominio}", f"📅 Fecha: {fecha}", f"⚠️ Nivel de riesgo: {riesgo}"]
-                                resultados_rep_limpios = [r.replace('\U0001f7e1', '').replace('\U0001f7e0', '').replace('\U0001f534', '').replace('\U0001f7e2', '').replace('\u26aa', '') if isinstance(r, str) else r for r in resultados_rep]
-                                try:
-                                    pdf_bytes = crear_pdf(dominio, resultados_rep_limpios)
-                                except Exception as error:
-                                    log_panel_failure("reports_pdf", error)
-                                    st.warning("No se pudo preparar este informe. Los demás apartados siguen disponibles.")
-                                    return
-                                if _descargar_pdf_seguro(
-                                    report_id=reporte_id,
-                                    label="📄 Descargar Reporte PDF",
-                                    data=pdf_bytes,
-                                    file_name=f"reporte_{dominio}.pdf",
-                                    mime="application/pdf",
-                                    key=f"dl_pdf_{sufijo}_{index}",
-                                    use_container_width=True,
-                                    type="primary"
-                                ):
-                                    pass  # Consumo autorizado por RPC antes de servir el PDF.
-                            else:
-                                if st.button("📄 Descargar Reporte PDF", key=f"btn_pdf_{sufijo}_{index}", use_container_width=True):
-                                    st.session_state[f"mostrar_upsell_{sufijo}_{index}"] = True
-                                if st.session_state.get(f"mostrar_upsell_{sufijo}_{index}"):
-                                    st.warning("🔒 Para descargar el reporte PDF necesitas el **Plan Pro** o **Enterprise**, también puedes comprarlo por **9,99€**.")
-                                    _purchase_button(STRIPE_PRICES['pdf_unico'], email_pago, 'pdf_unico', 'payment', '🛒 Comprar por 9,99€', 'purchase_3219', use_container_width=True)
-                    st.markdown("</div>", unsafe_allow_html=True)
-
-            if sub_tab_recientes.open:
-                with sub_tab_recientes:
-                    for i, rep in enumerate(historial_filtrado[:5]):
-                        pintar_reporte(rep, i, "filtro")
-
-            if sub_tab_todos.open:
-                with sub_tab_todos:
-                    with st.container(height=400):
-                        for i, rep in enumerate(historial_filtrado):
-                            pintar_reporte(rep, i, "todos")
-                            st.markdown("---")
-
-    section_loaded("reports")
+section_loaded("reports")
 
 # ==========================================
 # PESTAÑA 4: AMENAZAS (Diccionario B2B y Live Feed)
 # ==========================================
-if menu_amenazas.open:
-    with menu_amenazas, measure_panel("threats"):
-        import requests
-        import pandas as pd
+with menu_amenazas, measure_panel("threats"):
+    import requests
+    import pandas as pd
 
-        st.markdown("""
-        <style>
-            .threat-hero {
-                background: radial-gradient(1000px 260px at 0% -25%, rgba(255,75,75,0.14), transparent 48%),
-                            radial-gradient(850px 240px at 105% -20%, rgba(255,189,69,0.10), transparent 45%),
-                            linear-gradient(180deg, #171c25 0%, #121820 100%);
-                border: 1px solid #30363d;
-                border-radius: 16px;
-                padding: 24px 24px 20px 24px;
-                margin-bottom: 16px;
-                box-shadow: 0 12px 28px rgba(0,0,0,0.28);
-            }
-            .threat-kicker { margin: 0; color: #8b949e; text-transform: uppercase; letter-spacing: 1.3px; font-size: 0.75rem; font-weight: 700; }
-            .threat-title { margin: 10px 0 8px 0; color: #f0f6fc; font-size: 1.9rem; font-weight: 760; letter-spacing: 0.2px; line-height: 1.2; }
-            .threat-subtitle { margin: 0; color: #9aa4af; font-size: 1rem; line-height: 1.6; max-width: 880px; }
-            .threat-section-title { margin: 2px 0 10px 0; color: #f0f6fc; font-size: 1.2rem; letter-spacing: 0.2px; font-weight: 700; }
-            .threat-section-sub { margin: 0 0 12px 0; color: #8b949e; font-size: 0.95rem; }
-            div[data-testid="stExpander"] { background: linear-gradient(180deg, #161b22 0%, #121820 100%); border: 1px solid #30363d; border-radius: 12px; box-shadow: 0 8px 22px rgba(0,0,0,0.24); margin-bottom: 10px; overflow: hidden; }
-            div[data-testid="stExpander"] details > summary { background: rgba(255,255,255,0.01); padding-top: 2px; padding-bottom: 2px; }
-            div[data-testid="stDataFrame"] { border: 1px solid #30363d; border-radius: 14px; overflow: hidden; box-shadow: 0 12px 26px rgba(0,0,0,0.25); }
-        </style>
-        """, unsafe_allow_html=True)
+    st.markdown("""
+    <style>
+        .threat-hero {
+            background: radial-gradient(1000px 260px at 0% -25%, rgba(255,75,75,0.14), transparent 48%),
+                        radial-gradient(850px 240px at 105% -20%, rgba(255,189,69,0.10), transparent 45%),
+                        linear-gradient(180deg, #171c25 0%, #121820 100%);
+            border: 1px solid #30363d;
+            border-radius: 16px;
+            padding: 24px 24px 20px 24px;
+            margin-bottom: 16px;
+            box-shadow: 0 12px 28px rgba(0,0,0,0.28);
+        }
+        .threat-kicker { margin: 0; color: #8b949e; text-transform: uppercase; letter-spacing: 1.3px; font-size: 0.75rem; font-weight: 700; }
+        .threat-title { margin: 10px 0 8px 0; color: #f0f6fc; font-size: 1.9rem; font-weight: 760; letter-spacing: 0.2px; line-height: 1.2; }
+        .threat-subtitle { margin: 0; color: #9aa4af; font-size: 1rem; line-height: 1.6; max-width: 880px; }
+        .threat-section-title { margin: 2px 0 10px 0; color: #f0f6fc; font-size: 1.2rem; letter-spacing: 0.2px; font-weight: 700; }
+        .threat-section-sub { margin: 0 0 12px 0; color: #8b949e; font-size: 0.95rem; }
+        div[data-testid="stExpander"] { background: linear-gradient(180deg, #161b22 0%, #121820 100%); border: 1px solid #30363d; border-radius: 12px; box-shadow: 0 8px 22px rgba(0,0,0,0.24); margin-bottom: 10px; overflow: hidden; }
+        div[data-testid="stExpander"] details > summary { background: rgba(255,255,255,0.01); padding-top: 2px; padding-bottom: 2px; }
+        div[data-testid="stDataFrame"] { border: 1px solid #30363d; border-radius: 14px; overflow: hidden; box-shadow: 0 12px 26px rgba(0,0,0,0.25); }
+    </style>
+    """, unsafe_allow_html=True)
 
-        st.markdown("""
-            <div class="threat-hero">
-                <p class="threat-kicker">Threat Intelligence Suite</p>
-                <h2 class="threat-title">Inteligencia de Amenazas y Riesgos</h2>
-                <p class="threat-subtitle">Conoce a qué te enfrentas y cómo VulnScan protege tu infraestructura con contexto técnico, impacto de negocio y telemetría de vulnerabilidades en tiempo casi real.</p>
-            </div>
-        """, unsafe_allow_html=True)
+    st.markdown("""
+        <div class="threat-hero">
+            <p class="threat-kicker">Threat Intelligence Suite</p>
+            <h2 class="threat-title">Inteligencia de Amenazas y Riesgos</h2>
+            <p class="threat-subtitle">Conoce a qué te enfrentas y cómo VulnScan protege tu infraestructura con contexto técnico, impacto de negocio y telemetría de vulnerabilidades en tiempo casi real.</p>
+        </div>
+    """, unsafe_allow_html=True)
 
-        # --- SECCIÓN 1: DICCIONARIO DE VENTAS INTERACTIVO ---
-        st.markdown("<h3 class='threat-section-title'>🚨 El Panorama de Riesgos Actual</h3>", unsafe_allow_html=True)
-        st.markdown("<p class='threat-section-sub'>Mapa ejecutivo de amenazas prioritarias para evaluar exposición y tomar decisiones de mitigación.</p>", unsafe_allow_html=True)
+    # --- SECCIÓN 1: DICCIONARIO DE VENTAS INTERACTIVO ---
+    st.markdown("<h3 class='threat-section-title'>🚨 El Panorama de Riesgos Actual</h3>", unsafe_allow_html=True)
+    st.markdown("<p class='threat-section-sub'>Mapa ejecutivo de amenazas prioritarias para evaluar exposición y tomar decisiones de mitigación.</p>", unsafe_allow_html=True)
     
-        # 1. El Buscador
-        termino_amenaza = st.text_input("🔍", placeholder="Buscar amenaza (Ej. Ransomware, Phishing, DDoS...)", label_visibility="collapsed")
-        st.markdown("<br>", unsafe_allow_html=True)
+    # 1. El Buscador
+    termino_amenaza = st.text_input("🔍", placeholder="Buscar amenaza (Ej. Ransomware, Phishing, DDoS...)", label_visibility="collapsed")
+    st.markdown("<br>", unsafe_allow_html=True)
 
-             # 2. Base de datos interna de amenazas (ACTUALIZADA CON 10 AMENAZAS)
-        diccionario_amenazas = [
-            {
-                "titulo": "1. Ransomware & Cripto-Secuestro",
-                "que": "**¿Qué es?** Un software malicioso que cifra todos los ordenadores y servidores de tu empresa, dejándolos inutilizables hasta que pagues un rescate en Bitcoin.",
-                "impacto": "** Impacto de Negocio:** Parada total de la actividad comercial. El coste medio de recuperación para una PYME ronda los 120.000€.",
-                "escudo": "** Escudo VulnScan:** Escaneamos puertos críticos (RDP/SMB) que los atacantes usan para introducir el Ransomware y te avisamos antes."
-            },
-            {
-                "titulo": "2. Ataques DDoS (Denegación de Servicio)",
-                "que": "**¿Qué es?** Envío masivo de tráfico basura a tu web hasta saturar los servidores y tirarlos abajo.",
-                "impacto": "** Impacto de Negocio:** Pérdida de ventas directas y daño reputacional por cada minuto de caída.",
-                "escudo": "** Escudo VulnScan:** Analizamos si tu protección Anti-DDoS está bien configurada o si se puede saltar fácilmente."
-            },
-            {
-                "titulo": "3. Explotación de Zero-Days",
-                "que": "**¿Qué es?** Agujeros de seguridad recién descubiertos en programas para los cuales aún no hay actualización.",
-                "impacto": "** Impacto de Negocio:** Eres vulnerable sin saberlo. Los atacantes rastrean la red buscando víctimas antes de que el parche se publique.",
-                "escudo": "** Escudo VulnScan:** Nuestro Feed CTI te alerta si tus tecnologías coinciden con las vulnerabilidades globales reportadas hoy."
-            },
-            {
-                "titulo": "4. Exposición de la Nube y APIs",
-                "que": "**¿Qué es?** Dejar una base de datos en AWS, Google Cloud o Azure mal configurada, permitiendo acceso público sin contraseña.",
-                "impacto": "** Impacto de Negocio:** Robo directo de la base de datos completa y multas millonarias por negligencia (RGPD).",
-                "escudo": "** Escudo VulnScan:** El análisis OSINT pasivo rastrea si tu infraestructura en la nube está filtrando datos al internet público."
-            },
-            {
-                "titulo": "5. Phishing & Robo de Credenciales",
-                "que": "**¿Qué es?** Engaño a tus empleados para que introduzcan sus contraseñas corporativas en una web falsa controlada por hackers.",
-                "impacto": "** Impacto de Negocio:** Los hackers acceden a tu empresa como usuarios legítimos para robar dinero o información sin sospechas.",
-                "escudo": "** Escudo VulnScan:** Rastreos en la Dark Web. Te avisamos si el email de un empleado aparece en bases de datos hackeadas."
-            },
-            {
-                "titulo": "6. Inyección SQL & Vulnerabilidades Web",
-                "que": "**¿Qué es?** Introducir código malicioso en formularios de tu web para engañar a tu base de datos y extraer información privada.",
-                "impacto": "** Impacto de Negocio:** Exfiltración masiva de tarjetas de crédito o contraseñas de tus clientes.",
-                "escudo": "** Escudo VulnScan:** La auditoría OWASP ataca simuladamente tus formularios para parchear inyecciones antes de producción."
-            },
-            {
-                "titulo": "7. Ataques a la Cadena de Suministro",
-                "que": "**¿Qué es?** Los hackers no te atacan a ti directamente, atacan a un proveedor de software que utilizas y entran a tu red a través de ellos.",
-                "impacto": "** Impacto de Negocio:** Infección masiva casi indetectable que compromete la integridad de toda tu red a ciegas.",
-                "escudo": "** Escudo VulnScan:** Mapeo de perímetro completo, incluyendo servicios de terceros olvidados para limitar tu exposición."
-            },
-            {
-                "titulo": "8. Fugas de Información (Data Leaks)",
-                "que": "**¿Qué es?** Documentos internos o código fuente expuestos en foros de hackers o repositorios públicos por error humano.",
-                "impacto": "** Impacto de Negocio:** Pérdida de propiedad intelectual, ventaja frente a competidores y demandas de clientes.",
-                "escudo": "** Escudo VulnScan:** Monitorización 24/7. Si tu marca aparece asociada a una filtración, recibirás un reporte crítico inmediato."
-            },
-            {
-                "titulo": "9. Malware & Software Malicioso",
-                "que": "**¿Qué es?** Software diseñado para infiltrarse en tus dispositivos sin consentimiento, incluyendo virus, troyanos y spyware.",
-                "impacto": "** Impacto de Negocio:** Robo de información personal, espionaje a través de cámaras/micrófonos y daño permanente al hardware.",
-                "escudo": "** Escudo VulnScan:** Detectamos firmas de software no autorizado y comportamientos sospechosos en tus puntos de entrada digitales."
-            },
-            {
-                "titulo": "10. Redes Wi-Fi Inseguras",
-                "que": "**¿Qué es?** Conectarse a redes públicas (aeropuertos, cafeterías) donde atacantes pueden interceptar todo el tráfico de datos.",
-                "impacto": "** Impacto de Negocio:** Robo de sesiones de trabajo de empleados en remoto y captura de credenciales bancarias o de acceso.",
-                "escudo": "** Escudo VulnScan:** Evaluamos si tus servicios obligan al uso de cifrado fuerte (TLS) para proteger los datos en redes hostiles."
-            }
+         # 2. Base de datos interna de amenazas (ACTUALIZADA CON 10 AMENAZAS)
+    diccionario_amenazas = [
+        {
+            "titulo": "1. Ransomware & Cripto-Secuestro",
+            "que": "**¿Qué es?** Un software malicioso que cifra todos los ordenadores y servidores de tu empresa, dejándolos inutilizables hasta que pagues un rescate en Bitcoin.",
+            "impacto": "** Impacto de Negocio:** Parada total de la actividad comercial. El coste medio de recuperación para una PYME ronda los 120.000€.",
+            "escudo": "** Escudo VulnScan:** Escaneamos puertos críticos (RDP/SMB) que los atacantes usan para introducir el Ransomware y te avisamos antes."
+        },
+        {
+            "titulo": "2. Ataques DDoS (Denegación de Servicio)",
+            "que": "**¿Qué es?** Envío masivo de tráfico basura a tu web hasta saturar los servidores y tirarlos abajo.",
+            "impacto": "** Impacto de Negocio:** Pérdida de ventas directas y daño reputacional por cada minuto de caída.",
+            "escudo": "** Escudo VulnScan:** Analizamos si tu protección Anti-DDoS está bien configurada o si se puede saltar fácilmente."
+        },
+        {
+            "titulo": "3. Explotación de Zero-Days",
+            "que": "**¿Qué es?** Agujeros de seguridad recién descubiertos en programas para los cuales aún no hay actualización.",
+            "impacto": "** Impacto de Negocio:** Eres vulnerable sin saberlo. Los atacantes rastrean la red buscando víctimas antes de que el parche se publique.",
+            "escudo": "** Escudo VulnScan:** Nuestro Feed CTI te alerta si tus tecnologías coinciden con las vulnerabilidades globales reportadas hoy."
+        },
+        {
+            "titulo": "4. Exposición de la Nube y APIs",
+            "que": "**¿Qué es?** Dejar una base de datos en AWS, Google Cloud o Azure mal configurada, permitiendo acceso público sin contraseña.",
+            "impacto": "** Impacto de Negocio:** Robo directo de la base de datos completa y multas millonarias por negligencia (RGPD).",
+            "escudo": "** Escudo VulnScan:** El análisis OSINT pasivo rastrea si tu infraestructura en la nube está filtrando datos al internet público."
+        },
+        {
+            "titulo": "5. Phishing & Robo de Credenciales",
+            "que": "**¿Qué es?** Engaño a tus empleados para que introduzcan sus contraseñas corporativas en una web falsa controlada por hackers.",
+            "impacto": "** Impacto de Negocio:** Los hackers acceden a tu empresa como usuarios legítimos para robar dinero o información sin sospechas.",
+            "escudo": "** Escudo VulnScan:** Rastreos en la Dark Web. Te avisamos si el email de un empleado aparece en bases de datos hackeadas."
+        },
+        {
+            "titulo": "6. Inyección SQL & Vulnerabilidades Web",
+            "que": "**¿Qué es?** Introducir código malicioso en formularios de tu web para engañar a tu base de datos y extraer información privada.",
+            "impacto": "** Impacto de Negocio:** Exfiltración masiva de tarjetas de crédito o contraseñas de tus clientes.",
+            "escudo": "** Escudo VulnScan:** La auditoría OWASP ataca simuladamente tus formularios para parchear inyecciones antes de producción."
+        },
+        {
+            "titulo": "7. Ataques a la Cadena de Suministro",
+            "que": "**¿Qué es?** Los hackers no te atacan a ti directamente, atacan a un proveedor de software que utilizas y entran a tu red a través de ellos.",
+            "impacto": "** Impacto de Negocio:** Infección masiva casi indetectable que compromete la integridad de toda tu red a ciegas.",
+            "escudo": "** Escudo VulnScan:** Mapeo de perímetro completo, incluyendo servicios de terceros olvidados para limitar tu exposición."
+        },
+        {
+            "titulo": "8. Fugas de Información (Data Leaks)",
+            "que": "**¿Qué es?** Documentos internos o código fuente expuestos en foros de hackers o repositorios públicos por error humano.",
+            "impacto": "** Impacto de Negocio:** Pérdida de propiedad intelectual, ventaja frente a competidores y demandas de clientes.",
+            "escudo": "** Escudo VulnScan:** Monitorización 24/7. Si tu marca aparece asociada a una filtración, recibirás un reporte crítico inmediato."
+        },
+        {
+            "titulo": "9. Malware & Software Malicioso",
+            "que": "**¿Qué es?** Software diseñado para infiltrarse en tus dispositivos sin consentimiento, incluyendo virus, troyanos y spyware.",
+            "impacto": "** Impacto de Negocio:** Robo de información personal, espionaje a través de cámaras/micrófonos y daño permanente al hardware.",
+            "escudo": "** Escudo VulnScan:** Detectamos firmas de software no autorizado y comportamientos sospechosos en tus puntos de entrada digitales."
+        },
+        {
+            "titulo": "10. Redes Wi-Fi Inseguras",
+            "que": "**¿Qué es?** Conectarse a redes públicas (aeropuertos, cafeterías) donde atacantes pueden interceptar todo el tráfico de datos.",
+            "impacto": "** Impacto de Negocio:** Robo de sesiones de trabajo de empleados en remoto y captura de credenciales bancarias o de acceso.",
+            "escudo": "** Escudo VulnScan:** Evaluamos si tus servicios obligan al uso de cifrado fuerte (TLS) para proteger los datos en redes hostiles."
+        }
+    ]
+
+    # 3. Lógica de Filtrado
+    if termino_amenaza:
+        amenazas_filtradas = [a for a in diccionario_amenazas if termino_amenaza.lower() in a['titulo'].lower() or termino_amenaza.lower() in a['que'].lower()]
+    else:
+        amenazas_filtradas = diccionario_amenazas
+
+  # 4. Dibujar Resultados (En dos columnas dinámicas)
+    if len(amenazas_filtradas) == 0:
+        # 🤖 EL TRUCO MÁGICO: Respuesta Dinámica Universal
+        st.info(f"Buscando telemetría y firmas de ataque para: **{termino_amenaza}**...")
+        
+        with st.expander(f" 🤖 Análisis de Inteligencia CTI: {termino_amenaza.title()}", expanded=True):
+            st.info(f"**Contexto de Amenaza:** Aunque **{termino_amenaza}** no se encuentra en nuestro panel estático de amenazas prioritarias, nuestras bases de datos globales monitorizan activamente patrones asociados a esta categoría.")
+            st.error(f"**Impacto Potencial:** Los vectores de ataque relacionados con {termino_amenaza.lower()} pueden derivar en accesos no autorizados, degradación del rendimiento de la red o brechas de cumplimiento normativo.")
+            st.success(f"**Cobertura VulnScan:** Nuestro escáner de vulnerabilidades perimetral y la revisión de puertos están diseñados para detectar fallos de configuración que los atacantes suelen explotar utilizando técnicas de **{termino_amenaza}**.")
+            
+    else:
+        # Dibuja las tarjetas normales si sí las encuentra
+        col_a, col_b = st.columns(2, gap="large")
+        for i, amenaza in enumerate(amenazas_filtradas):
+            columna_destino = col_a if i % 2 == 0 else col_b
+            with columna_destino:
+                with st.expander(f" {amenaza['titulo']}"):
+                    st.info(amenaza['que'])
+                    st.error(amenaza['impacto'])
+                    st.success(amenaza['escudo'])
+
+    # --- SECCIÓN 2: LIVE FEED (Totalmente Abierto) ---
+    st.markdown("<h3 class='threat-section-title'>🔴 Live Threat Feed: Vulnerabilidades Detectadas Hoy</h3>", unsafe_allow_html=True)
+    st.markdown("<p class='threat-section-sub'>Conexión en tiempo real con fuentes globales de inteligencia para priorizar parches en función de criticidad.</p>", unsafe_allow_html=True)
+
+    @st.cache_data(ttl=3600)
+    def obtener_inteligencia_real():
+        try:
+            url = "https://cve.circl.lu/api/last"
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+            with measure_panel("threat_feed_read"):
+                respuesta = requests.get(url, headers=headers, timeout=(3, 8))
+            if respuesta.status_code == 200:
+                return respuesta.json()[:6]
+        except:
+            pass
+        
+        return [
+            {"id": "CVE-2024-3400", "cvss": "10.0", "summary": "Vulnerabilidad crítica en Palo Alto Networks PAN-OS. Permite a un atacante no autenticado ejecutar código remoto."},
+            {"id": "CVE-2024-3094", "cvss": "10.0", "summary": "Puerta trasera maliciosa descubierta en la utilidad XZ Utils de Linux. Compromete SSH."},
+            {"id": "CVE-2024-21887", "cvss": "9.1", "summary": "Vulnerabilidad de inyección de comandos en Ivanti Connect Secure. Explotación activa detectada."},
+            {"id": "CVE-2024-29988", "cvss": "8.8", "summary": "Bypass de seguridad en Microsoft SmartScreen. Usado activamente para distribuir malware."},
+            {"id": "CVE-2023-48788", "cvss": "9.3", "summary": "Inyección SQL en Fortinet FortiClient EMS que permite ejecución de código remoto."},
+            {"id": "CVE-2024-27198", "cvss": "9.8", "summary": "Bypass de autenticación en JetBrains TeamCity. Acceso total comprometido en entornos CI/CD."}
         ]
-
-        # 3. Lógica de Filtrado
-        if termino_amenaza:
-            amenazas_filtradas = [a for a in diccionario_amenazas if termino_amenaza.lower() in a['titulo'].lower() or termino_amenaza.lower() in a['que'].lower()]
-        else:
-            amenazas_filtradas = diccionario_amenazas
-
-      # 4. Dibujar Resultados (En dos columnas dinámicas)
-        if len(amenazas_filtradas) == 0:
-            # 🤖 EL TRUCO MÁGICO: Respuesta Dinámica Universal
-            st.info(f"Buscando telemetría y firmas de ataque para: **{termino_amenaza}**...")
-        
-            with st.expander(f" 🤖 Análisis de Inteligencia CTI: {termino_amenaza.title()}", expanded=True):
-                st.info(f"**Contexto de Amenaza:** Aunque **{termino_amenaza}** no se encuentra en nuestro panel estático de amenazas prioritarias, nuestras bases de datos globales monitorizan activamente patrones asociados a esta categoría.")
-                st.error(f"**Impacto Potencial:** Los vectores de ataque relacionados con {termino_amenaza.lower()} pueden derivar en accesos no autorizados, degradación del rendimiento de la red o brechas de cumplimiento normativo.")
-                st.success(f"**Cobertura VulnScan:** Nuestro escáner de vulnerabilidades perimetral y la revisión de puertos están diseñados para detectar fallos de configuración que los atacantes suelen explotar utilizando técnicas de **{termino_amenaza}**.")
             
-        else:
-            # Dibuja las tarjetas normales si sí las encuentra
-            col_a, col_b = st.columns(2, gap="large")
-            for i, amenaza in enumerate(amenazas_filtradas):
-                columna_destino = col_a if i % 2 == 0 else col_b
-                with columna_destino:
-                    with st.expander(f" {amenaza['titulo']}"):
-                        st.info(amenaza['que'])
-                        st.error(amenaza['impacto'])
-                        st.success(amenaza['escudo'])
+    datos_reales = obtener_inteligencia_real()
 
-        # --- SECCIÓN 2: LIVE FEED (Totalmente Abierto) ---
-        st.markdown("<h3 class='threat-section-title'>🔴 Live Threat Feed: Vulnerabilidades Detectadas Hoy</h3>", unsafe_allow_html=True)
-        st.markdown("<p class='threat-section-sub'>Conexión en tiempo real con fuentes globales de inteligencia para priorizar parches en función de criticidad.</p>", unsafe_allow_html=True)
-
-        @st.cache_data(ttl=3600)
-        def obtener_inteligencia_real():
-            try:
-                url = "https://cve.circl.lu/api/last"
-                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-                with measure_panel("threat_feed_read"):
-                    respuesta = requests.get(url, headers=headers, timeout=(3, 8))
-                if respuesta.status_code == 200:
-                    return respuesta.json()[:6]
-            except:
-                pass
-        
-            return [
-                {"id": "CVE-2024-3400", "cvss": "10.0", "summary": "Vulnerabilidad crítica en Palo Alto Networks PAN-OS. Permite a un atacante no autenticado ejecutar código remoto."},
-                {"id": "CVE-2024-3094", "cvss": "10.0", "summary": "Puerta trasera maliciosa descubierta en la utilidad XZ Utils de Linux. Compromete SSH."},
-                {"id": "CVE-2024-21887", "cvss": "9.1", "summary": "Vulnerabilidad de inyección de comandos en Ivanti Connect Secure. Explotación activa detectada."},
-                {"id": "CVE-2024-29988", "cvss": "8.8", "summary": "Bypass de seguridad en Microsoft SmartScreen. Usado activamente para distribuir malware."},
-                {"id": "CVE-2023-48788", "cvss": "9.3", "summary": "Inyección SQL en Fortinet FortiClient EMS que permite ejecución de código remoto."},
-                {"id": "CVE-2024-27198", "cvss": "9.8", "summary": "Bypass de autenticación en JetBrains TeamCity. Acceso total comprometido en entornos CI/CD."}
-            ]
+    if datos_reales:
+        lista_amenazas = []
+        for cve in datos_reales:
+            item = feed_item(cve)
+            if item is not None:
+                lista_amenazas.append(item)
             
-        datos_reales = obtener_inteligencia_real()
-
-        if datos_reales:
-            lista_amenazas = []
-            for cve in datos_reales:
-                item = feed_item(cve)
-                if item is not None:
-                    lista_amenazas.append(item)
-            
-            df_amenazas = pd.DataFrame(lista_amenazas)
+        df_amenazas = pd.DataFrame(lista_amenazas)
         
-            # Tabla mostrada para todos sin restricciones (y con el ancho correcto para que no salgan errores rojos)
-            st.dataframe(df_amenazas, width='stretch', hide_index=True)
-    section_loaded("threats")
+        # Tabla mostrada para todos sin restricciones (y con el ancho correcto para que no salgan errores rojos)
+        st.dataframe(df_amenazas, width='stretch', hide_index=True)
+section_loaded("threats")
 
 # ==========================================
 # PESTAÑA 5: CONFIGURACIÓN (API, Webhooks y Billing Real)
 # ==========================================
-if menu_config.open:
-    with menu_config, measure_panel("settings"):
-        import secrets
-        import requests
-        import time
-        from datetime import datetime, timedelta
+with menu_config, measure_panel("settings"):
+    import secrets
+    import requests
+    import time
+    from datetime import datetime, timedelta
 
-        st.markdown("""
-        <style>
-            .config-hero {
-                background: radial-gradient(1100px 280px at -5% -30%, rgba(96,180,255,0.13), transparent 50%),
-                            radial-gradient(900px 240px at 105% -15%, rgba(0,255,204,0.10), transparent 45%),
-                            linear-gradient(180deg, #171d26 0%, #121820 100%);
-                border: 1px solid #30363d;
-                border-radius: 16px;
-                padding: 24px 24px 20px 24px;
-                margin-bottom: 16px;
-                box-shadow: 0 12px 28px rgba(0,0,0,0.26);
-            }
-            .config-kicker { margin: 0; color: #8b949e; text-transform: uppercase; letter-spacing: 1.3px; font-size: 0.75rem; font-weight: 700; }
-            .config-title { margin: 10px 0 8px 0; color: #f0f6fc; font-size: 1.9rem; font-weight: 760; letter-spacing: 0.2px; line-height: 1.2; }
-            .config-subtitle { margin: 0; color: #9aa4af; font-size: 1rem; line-height: 1.6; max-width: 850px; }
-            div[data-testid="stTabs"] button[role="tab"] { border: none !important; background: transparent !important; box-shadow: none !important; margin-right: 6px; color: #d0d7de !important; transition: color 0.2s ease; }
-            div[data-testid="stTabs"] button[role="tab"]:hover { color: #ff4b4b !important; }
-            div[data-testid="stTabs"] button[aria-selected="true"] { background: transparent !important; border: none !important; box-shadow: none !important; color: #ff4b4b !important; }
-            div[data-testid="stTextInput"] input { background: #0f141b !important; border: 1px solid #30363d !important; border-radius: 12px !important; min-height: 48px; }
-            div[data-testid="stTextInput"] input:focus { border-color: rgba(0,255,204,0.58) !important; box-shadow: 0 0 0 2px rgba(0,255,204,0.15); }
-            div[data-testid="stButton"] > button { border-radius: 12px !important; min-height: 46px !important; font-weight: 700 !important; }
-            div[data-testid="stButton"] > button[kind="primary"] { background: linear-gradient(90deg, #00ffcc 0%, #00d8af 100%) !important; color: #06221a !important; border: none !important; box-shadow: 0 10px 22px rgba(0,255,204,0.22); }
-            .config-card { background: linear-gradient(180deg, #161b22 0%, #121820 100%); border: 1px solid #30363d; border-radius: 12px; padding: 14px 14px 10px 14px; margin-bottom: 10px; box-shadow: 0 8px 22px rgba(0,0,0,0.22); }
-            div[data-testid="stExpander"] { background: linear-gradient(180deg, #161b22 0%, #121820 100%); border: 1px solid #30363d; border-radius: 12px; box-shadow: 0 8px 22px rgba(0,0,0,0.24); margin-top: 8px; overflow: hidden; }
-        </style>
-        """, unsafe_allow_html=True)
+    st.markdown("""
+    <style>
+        .config-hero {
+            background: radial-gradient(1100px 280px at -5% -30%, rgba(96,180,255,0.13), transparent 50%),
+                        radial-gradient(900px 240px at 105% -15%, rgba(0,255,204,0.10), transparent 45%),
+                        linear-gradient(180deg, #171d26 0%, #121820 100%);
+            border: 1px solid #30363d;
+            border-radius: 16px;
+            padding: 24px 24px 20px 24px;
+            margin-bottom: 16px;
+            box-shadow: 0 12px 28px rgba(0,0,0,0.26);
+        }
+        .config-kicker { margin: 0; color: #8b949e; text-transform: uppercase; letter-spacing: 1.3px; font-size: 0.75rem; font-weight: 700; }
+        .config-title { margin: 10px 0 8px 0; color: #f0f6fc; font-size: 1.9rem; font-weight: 760; letter-spacing: 0.2px; line-height: 1.2; }
+        .config-subtitle { margin: 0; color: #9aa4af; font-size: 1rem; line-height: 1.6; max-width: 850px; }
+        div[data-testid="stTabs"] button[role="tab"] { border: none !important; background: transparent !important; box-shadow: none !important; margin-right: 6px; color: #d0d7de !important; transition: color 0.2s ease; }
+        div[data-testid="stTabs"] button[role="tab"]:hover { color: #ff4b4b !important; }
+        div[data-testid="stTabs"] button[aria-selected="true"] { background: transparent !important; border: none !important; box-shadow: none !important; color: #ff4b4b !important; }
+        div[data-testid="stTextInput"] input { background: #0f141b !important; border: 1px solid #30363d !important; border-radius: 12px !important; min-height: 48px; }
+        div[data-testid="stTextInput"] input:focus { border-color: rgba(0,255,204,0.58) !important; box-shadow: 0 0 0 2px rgba(0,255,204,0.15); }
+        div[data-testid="stButton"] > button { border-radius: 12px !important; min-height: 46px !important; font-weight: 700 !important; }
+        div[data-testid="stButton"] > button[kind="primary"] { background: linear-gradient(90deg, #00ffcc 0%, #00d8af 100%) !important; color: #06221a !important; border: none !important; box-shadow: 0 10px 22px rgba(0,255,204,0.22); }
+        .config-card { background: linear-gradient(180deg, #161b22 0%, #121820 100%); border: 1px solid #30363d; border-radius: 12px; padding: 14px 14px 10px 14px; margin-bottom: 10px; box-shadow: 0 8px 22px rgba(0,0,0,0.22); }
+        div[data-testid="stExpander"] { background: linear-gradient(180deg, #161b22 0%, #121820 100%); border: 1px solid #30363d; border-radius: 12px; box-shadow: 0 8px 22px rgba(0,0,0,0.24); margin-top: 8px; overflow: hidden; }
+    </style>
+    """, unsafe_allow_html=True)
 
-        st.markdown("""
-            <div class="config-hero">
-                <p class="config-kicker">Platform Control Center</p>
-                <h2 class="config-title">Configuración y Developers</h2>
-                <p class="config-subtitle">Gestiona integraciones, credenciales y suscripción con una experiencia visual orientada a equipos técnicos y operaciones de seguridad.</p>
-            </div>
-        """, unsafe_allow_html=True)
+    st.markdown("""
+        <div class="config-hero">
+            <p class="config-kicker">Platform Control Center</p>
+            <h2 class="config-title">Configuración y Developers</h2>
+            <p class="config-subtitle">Gestiona integraciones, credenciales y suscripción con una experiencia visual orientada a equipos técnicos y operaciones de seguridad.</p>
+        </div>
+    """, unsafe_allow_html=True)
 
-        tab_api, tab_webhook, tab_billing = st.tabs(["🔑 API Keys", "🪝 Webhooks", "💳 Suscripción"])
+    tab_api, tab_webhook, tab_billing = st.tabs(["🔑 API Keys", "🪝 Webhooks", "💳 Suscripción"])
 
-        plan_actual = st.session_state.get('plan_activo', 'Basic')
-        email_usuario = st.session_state.get('email_usuario', '')
-
+    plan_actual = st.session_state.get('plan_activo', 'Basic')
+    email_usuario = st.session_state.get('email_usuario', '')
 
 
-        # --- 1. GESTIÓN DE API KEYS ---
-        with tab_api:
-            st.markdown("<div class='config-card'><h3 style='margin:0; color:#f0f6fc; font-size:1.12rem;'>Generación de Claves API</h3><p style='margin:8px 0 0 0; color:#8b949e; font-size:0.94rem;'>Usa estas claves para interactuar con la API REST de VulnScan desde tus propios servidores o pipelines CI/CD.</p></div>", unsafe_allow_html=True)
+
+    # --- 1. GESTIÓN DE API KEYS ---
+    with tab_api:
+        st.markdown("<div class='config-card'><h3 style='margin:0; color:#f0f6fc; font-size:1.12rem;'>Generación de Claves API</h3><p style='margin:8px 0 0 0; color:#8b949e; font-size:0.94rem;'>Usa estas claves para interactuar con la API REST de VulnScan desde tus propios servidores o pipelines CI/CD.</p></div>", unsafe_allow_html=True)
         
-            if plan_actual == 'Basic':
-                st.error("🔒 **Función Premium.** El acceso a la API REST es exclusivo para clientes con licencia Pro o Enterprise.")
-                st.info(" Automatiza tus escaneos conectando VulnScan directamente al código de tu empresa.")
-                col_upsell1, col_upsell2 = st.columns(2)
-                with col_upsell1:
-                    st.button(" Generar Key (Bloqueado)", disabled=True, width='stretch')
-                with col_upsell2:
-                    email_pago = st.session_state.get("email_usuario", "")
-                    usuario_logueado = bool(st.session_state.get("usuario_autenticado")) and bool(email_pago)
-                    if usuario_logueado:
-                        _purchase_button(STRIPE_PRICES['pro_recurrente'], email_pago, 'pro_recurrente', 'subscription', '⬆ Mejorar a Plan Pro', 'purchase_3481', type='primary', width='stretch')
-                    else:
-                        st.info("Inicia sesión para habilitar el pago.")
-            else:
-                if 'api_key_real' not in st.session_state:
-                    st.session_state['api_key_real'] = None
-                
-                st.info("⚠️ **Seguridad:** Por motivos de seguridad, las claves API solo se muestran una vez al ser generadas. Guárdala en un gestor de contraseñas seguro.")
-
-                col_key1, col_key2 = st.columns([3, 1])
-            
-                with col_key1:
-                    if st.session_state['api_key_real']:
-                        st.code(st.session_state['api_key_real'], language="bash")
-                        st.success("✅ API Key activa y lista para recibir peticiones.")
-                    else:
-                        st.code("sk_live_***********************************", language="bash")
-                    
-                import hashlib # Importamos la librería matemática de encriptación
-
-                with col_key2:
-                    if st.button(" Generar Nueva Key", type="primary", width='stretch'):
-                        # 1. Creamos la "manzana" (La clave real que verá el cliente)
-                        nueva_clave_clara = "sk_live_" + secrets.token_urlsafe(32)
-                    
-                        # 2. La metemos en la batidora (SHA-256)
-                        hash_obj = hashlib.sha256(nueva_clave_clara.encode())
-                        clave_triturada = hash_obj.hexdigest()
-                    
-                        # 3. Anotamos la manzana en la pizarra de Streamlit SOLO para que la copie ahora
-                        st.session_state['api_key_real'] = nueva_clave_clara
-                    
-                        # 4. Mandamos el puré triturado a la caja fuerte de Supabase
-                        actualizar_usuario_supabase(
-                            email_usuario, "api_key_real", clave_triturada, escribir_en_sesion=False
-                        )
-                    
-                        st.rerun()
-
-                st.markdown("<p style='margin:12px 0 8px 0; color:#d0d7de; font-size:0.94rem; font-weight:700; letter-spacing:0.2px;'>Documentación Rápida (Endpoints)</p>", unsafe_allow_html=True)
-                st.code("""
-    # Iniciar un escaneo vía API (Ejemplo en cURL)
-    curl -X POST https://api.vulnscan.com/v1/scans \\
-      -H "Authorization: Bearer TU_API_KEY" \\
-      -H "Content-Type: application/json" \\
-      -d '{"target": "miempresa.com", "nivel": "owasp"}'
-                """, language="bash")
-
-        # --- 2. WEBHOOKS REALES ---
-        with tab_webhook:
-            st.markdown("<div class='config-card'><h3 style='margin:0; color:#f0f6fc; font-size:1.12rem;'>Notificaciones Push (Webhooks)</h3><p style='margin:8px 0 0 0; color:#8b949e; font-size:0.94rem;'>Configura una URL para que VulnScan te envíe un archivo JSON automáticamente en tiempo real cuando detecte una vulnerabilidad Crítica.</p></div>", unsafe_allow_html=True)
-        
-            # ⚠️ CORRECCIÓN: Ahora bloquea a Basic Y Pro. Solo Enterprise pasa.
-            if plan_actual != 'Enterprise':
-                st.error(f"🔒 **Función Enterprise.** Tu plan actual ({plan_actual}) no admite notificaciones en tiempo real vía Webhook. Requiere licencia Enterprise.")
-                email_pago = st.session_state.get("email_usuario", "")
-                if email_pago:
-                    _purchase_button(STRIPE_PRICES['enterprise_recurrente'], email_pago, 'enterprise_recurrente', 'subscription', ' Mejorar a Plan Enterprise', 'purchase_3544', type='primary', use_container_width=True)
-            else:
-                if 'webhook_url' not in st.session_state:
-                    st.session_state['webhook_url'] = ""
-
-                webhook_input = st.text_input("Endpoint URL", value=st.session_state['webhook_url'], placeholder="https://tuservidor.com/api/webhook")
-            
-                col_w1, col_w2 = st.columns([1, 4])
-                with col_w1:
-                    if st.button(" Probar Webhook", type="primary", width='stretch'):
-                        if not webhook_input.startswith("http"):
-                            st.error("La URL debe empezar por http:// o https://")
-                        else:
-                            st.session_state['webhook_url'] = webhook_input
-                            actualizar_usuario_supabase(email_usuario, 'webhook_url', webhook_input)
-                            payload = {"evento": "alerta_critica", "dominio": "test-infra.com", "gravedad": "CRÍTICA", "mensaje": "Este es un evento de prueba enviado desde VulnScan SaaS."}
-                        
-                            with st.spinner("Enviando petición HTTP POST..."):
-                                try:
-                                    respuesta = requests.post(webhook_input, json=payload, timeout=5)
-                                    if respuesta.status_code in [200, 201, 202, 204]:
-                                        st.success(f"✅ ¡Éxito! El servidor respondió con el código {respuesta.status_code}")
-                                    else:
-                                        st.warning(f"⚠️ El servidor recibió el aviso, pero devolvió un error: {respuesta.status_code}")
-                                except Exception as e:
-                                    st.error(f"❌ Fallo de conexión. Revisa la URL o el firewall.")
-                                    st.markdown("---")
-                st.markdown("---")
-                st.markdown("""
-                    <style>
-                    input[type=number]::-webkit-inner-spin-button,
-                    input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-                    input[type=number] { -moz-appearance: textfield; }
-                    div[data-testid="stNumberInput"] { margin-top: -10px; }
-                    #btn_guardar_scheduler { background-color: #00FFCC !important; color: black !important; }
-                    </style>
-                """, unsafe_allow_html=True)
-
-                with st.container():
-                    st.markdown("""
-                        <div style='background:#161b22; border:1px solid #30363d; border-radius:12px; padding:20px; margin-bottom:16px;'>
-                            <h3 style='margin:0; color:#f0f6fc; font-size:1.12rem;'>🤖 Monitoreo Automático (Scheduler)</h3>
-                            <p style='margin:8px 0 0 0; color:#8b949e; font-size:0.94rem;'>El scheduler ejecuta escaneos automáticos de tus dominios verificados sin que tengas que hacer nada. Si tienes un webhook configurado, recibirás una alerta cada vez que se detecte una vulnerabilidad nueva.</p>
-                        </div>
-                    """, unsafe_allow_html=True)
-
-                    scheduler_activo = st.toggle("Activar monitoreo automático", value=st.session_state.get("scheduler_activo", False))
-
-                    if scheduler_activo:
-                        col1, col2, col3 = st.columns(3)
-
-                        with col1:
-                            passive_on = st.toggle("🕵️ Escaneo Pasivo (Basic)", value=st.session_state.get("scheduler_passive_on", True), key="toggle_passive")
-                            freq_passive = st.number_input("Cada X días", min_value=1, max_value=30, value=st.session_state.get("scheduler_freq_passive", 7), key="dias_basic", disabled=not passive_on)
-
-                        with col2:
-                            pro_on = st.toggle("🔍 Escaneo Profundo (Pro)", value=st.session_state.get("scheduler_pro_on", False), key="toggle_pro")
-                            freq_pro = st.number_input("Cada X días", min_value=1, max_value=30, value=st.session_state.get("scheduler_freq_pro", 15), key="dias_pro", disabled=not pro_on)
-
-                        with col3:
-                            enterprise_on = st.toggle("🔬 Auditoría OWASP (Enterprise)", value=st.session_state.get("scheduler_enterprise_on", False), key="toggle_enterprise")
-                            freq_enterprise = st.number_input("Cada X días", min_value=1, max_value=30, value=st.session_state.get("scheduler_freq_enterprise", 7), key="dias_ent", disabled=not enterprise_on)
-
-                        st.markdown("<br>", unsafe_allow_html=True)
-                        if st.button(" Guardar configuración de monitoreo", type="primary", use_container_width=True, key="btn_guardar_scheduler"):
-                            actualizar_usuario_supabase(email_usuario, "scheduler_activo", True)
-                            actualizar_usuario_supabase(email_usuario, "scheduler_passive_on", passive_on)
-                            actualizar_usuario_supabase(email_usuario, "scheduler_pro_on", pro_on)
-                            actualizar_usuario_supabase(email_usuario, "scheduler_enterprise_on", enterprise_on)
-                            actualizar_usuario_supabase(email_usuario, "scheduler_freq_passive", freq_passive)
-                            actualizar_usuario_supabase(email_usuario, "scheduler_freq_pro", freq_pro)
-                            actualizar_usuario_supabase(email_usuario, "scheduler_freq_enterprise", freq_enterprise)
-                            st.session_state["scheduler_activo"] = True
-                            st.session_state["scheduler_passive_on"] = passive_on
-                            st.session_state["scheduler_pro_on"] = pro_on
-                            st.session_state["scheduler_enterprise_on"] = enterprise_on
-                            st.session_state["scheduler_freq_passive"] = freq_passive
-                            st.session_state["scheduler_freq_pro"] = freq_pro
-                            st.session_state["scheduler_freq_enterprise"] = freq_enterprise
-                            st.success("✅ Configuración de monitoreo guardada correctamente.")
-                    else:
-                        if st.session_state.get("scheduler_activo", False):
-                            actualizar_usuario_supabase(email_usuario, "scheduler_activo", False)
-                            st.session_state["scheduler_activo"] = False
-                        st.info("El monitoreo automático está desactivado. Actívalo para que VulnScan escanee tus dominios automáticamente.")
-        # --- 3. GESTIÓN DE FACTURACIÓN ---
-        with tab_billing:
-            notice = st.session_state.pop('_renewal_notice', None)
-            if notice is not None:
-                message = "Cancelación al finalizar el periodo" if notice else "Renovación reactivada"
-                st.success(_vs_translate(message) + ": " + st.session_state.get('fecha_vencimiento', ''))
-            st.markdown("<div class='config-card'><h3 style='margin:0; color:#f0f6fc; font-size:1.12rem;'>Detalles de Suscripción</h3></div>", unsafe_allow_html=True)
-        
-            if 'cancelacion_pendiente' not in st.session_state:
-                st.session_state['cancelacion_pendiente'] = False
-
-            # Periodo confirmado por Stripe y sincronizado por el webhook.
-            fecha_calculada = st.session_state.get("fecha_vencimiento") or "Pendiente de sincronizar"
-
-            if plan_actual == 'Basic':
-                estado_texto = "GRATUITO"
-                color_estado = "#8b949e"
-                texto_fecha = "Sin caducidad"
-            elif st.session_state['cancelacion_pendiente']:
-                estado_texto = _vs_translate("Cancelación al finalizar el periodo")
-                color_estado = "#FFBD45"
-                texto_fecha = _vs_translate("Acceso hasta") + f": {fecha_calculada}"
-            else:
-                estado_texto = "ACTIVO"
-                color_estado = "#00FFCC"
-                texto_fecha = f"Próxima renovación: {fecha_calculada}"
-
-            st.markdown(f"""
-            <div style="background: linear-gradient(180deg, #161b22 0%, #121820 100%); border: 1px solid #30363d; border-radius: 12px; padding: 25px; margin-bottom: 20px; box-shadow: 0 10px 24px rgba(0,0,0,0.22);">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <div>
-                        <div style="color: #8b949e; font-size: 0.9rem; margin-bottom: 5px;">Plan Actual</div>
-                        <div style="color: #ffffff; font-size: 1.8rem; font-weight: bold; font-family: 'Outfit', sans-serif;">{plan_actual}</div>
-                    </div>
-                    <div style="text-align: right;">
-                        <div style="color: {color_estado}; font-size: 1rem; font-weight: bold;">Estado: {estado_texto}</div>
-                        <div style="color: #8b949e; font-size: 0.85rem;">{texto_fecha}</div>
-                    </div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-            col_b1, col_b2 = st.columns(2)
-            with col_b1:
-                stripe_action(st, label=_vs_translate("Gestionar tarjetas y facturacion"),
-                    key="open_billing_portal", scope=st.session_state.get("email_usuario", "") + ':portal',
-                    create=lambda attempt: customer_portal(stripe, supabase,
-                        st.session_state.get("email_usuario", ""), payment_return_url(language=st.session_state.get("_vs_lang", "es")),
-                        idempotency_key=attempt),
-                    on_error=lambda error: _billing_failure(error, "portal"), width="stretch")
-            with col_b2:
+        if plan_actual == 'Basic':
+            st.error("🔒 **Función Premium.** El acceso a la API REST es exclusivo para clientes con licencia Pro o Enterprise.")
+            st.info(" Automatiza tus escaneos conectando VulnScan directamente al código de tu empresa.")
+            col_upsell1, col_upsell2 = st.columns(2)
+            with col_upsell1:
+                st.button(" Generar Key (Bloqueado)", disabled=True, width='stretch')
+            with col_upsell2:
                 email_pago = st.session_state.get("email_usuario", "")
                 usuario_logueado = bool(st.session_state.get("usuario_autenticado")) and bool(email_pago)
                 if usuario_logueado:
-                    if plan_actual == 'Pro':
-                        price_id = STRIPE_PRICES['enterprise_recurrente']
-                        tipo_compra = 'enterprise_recurrente'
-                    else:
-                        price_id = STRIPE_PRICES['pro_recurrente']
-                        tipo_compra = 'pro_recurrente'
-                    _purchase_button(price_id, email_pago, tipo_compra, 'subscription', '⬆ Mejorar a Enterprise' if plan_actual == 'Pro' else '⬆ Mejorar a Plan Pro', 'purchase_3684', type='primary', width='stretch')
+                    _purchase_button(STRIPE_PRICES['pro_recurrente'], email_pago, 'pro_recurrente', 'subscription', '⬆ Mejorar a Plan Pro', 'purchase_3481', type='primary', width='stretch')
                 else:
                     st.info("Inicia sesión para habilitar el pago.")
-            
-            st.markdown("---")
-            with st.expander("Cancelación de la suscripción"):
-                if plan_actual == 'Basic':
-                    st.info("Actualmente estás en el plan gratuito. No hay ninguna suscripción activa que cancelar.")
-            
-                elif st.session_state['cancelacion_pendiente']:
-                    st.warning("Tu suscripción ya está programada para cancelarse. Seguirás teniendo acceso a tus beneficios premium hasta el final del periodo facturado.")
-                    if st.button(" Reactivar Suscripción "):
-                        if _cambiar_renovacion(False):
-                            st.rerun()
-            
-                else:
-                    st.warning("Al cancelar, no se te volverán a cobrar más mensualidades. Mantendrás tu acceso Pro/Enterprise y tus API Keys activas hasta el final de tu ciclo de facturación actual.")
-                    if st.button("🗑️ Cancelar Renovación"):
-                        if _cambiar_renovacion(True):
-                            st.rerun()
+        else:
+            if 'api_key_real' not in st.session_state:
+                st.session_state['api_key_real'] = None
+                
+            st.info("⚠️ **Seguridad:** Por motivos de seguridad, las claves API solo se muestran una vez al ser generadas. Guárdala en un gestor de contraseñas seguro.")
 
-    section_loaded("settings")
+            col_key1, col_key2 = st.columns([3, 1])
+            
+            with col_key1:
+                if st.session_state['api_key_real']:
+                    st.code(st.session_state['api_key_real'], language="bash")
+                    st.success("✅ API Key activa y lista para recibir peticiones.")
+                else:
+                    st.code("sk_live_***********************************", language="bash")
+                    
+            import hashlib # Importamos la librería matemática de encriptación
+
+            with col_key2:
+                if st.button(" Generar Nueva Key", type="primary", width='stretch'):
+                    # 1. Creamos la "manzana" (La clave real que verá el cliente)
+                    nueva_clave_clara = "sk_live_" + secrets.token_urlsafe(32)
+                    
+                    # 2. La metemos en la batidora (SHA-256)
+                    hash_obj = hashlib.sha256(nueva_clave_clara.encode())
+                    clave_triturada = hash_obj.hexdigest()
+                    
+                    # 3. Anotamos la manzana en la pizarra de Streamlit SOLO para que la copie ahora
+                    st.session_state['api_key_real'] = nueva_clave_clara
+                    
+                    # 4. Mandamos el puré triturado a la caja fuerte de Supabase
+                    actualizar_usuario_supabase(
+                        email_usuario, "api_key_real", clave_triturada, escribir_en_sesion=False
+                    )
+                    
+                    st.rerun()
+
+            st.markdown("<p style='margin:12px 0 8px 0; color:#d0d7de; font-size:0.94rem; font-weight:700; letter-spacing:0.2px;'>Documentación Rápida (Endpoints)</p>", unsafe_allow_html=True)
+            st.code("""
+# Iniciar un escaneo vía API (Ejemplo en cURL)
+curl -X POST https://api.vulnscan.com/v1/scans \\
+  -H "Authorization: Bearer TU_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"target": "miempresa.com", "nivel": "owasp"}'
+            """, language="bash")
+
+    # --- 2. WEBHOOKS REALES ---
+    with tab_webhook:
+        st.markdown("<div class='config-card'><h3 style='margin:0; color:#f0f6fc; font-size:1.12rem;'>Notificaciones Push (Webhooks)</h3><p style='margin:8px 0 0 0; color:#8b949e; font-size:0.94rem;'>Configura una URL para que VulnScan te envíe un archivo JSON automáticamente en tiempo real cuando detecte una vulnerabilidad Crítica.</p></div>", unsafe_allow_html=True)
+        
+        # ⚠️ CORRECCIÓN: Ahora bloquea a Basic Y Pro. Solo Enterprise pasa.
+        if plan_actual != 'Enterprise':
+            st.error(f"🔒 **Función Enterprise.** Tu plan actual ({plan_actual}) no admite notificaciones en tiempo real vía Webhook. Requiere licencia Enterprise.")
+            email_pago = st.session_state.get("email_usuario", "")
+            if email_pago:
+                _purchase_button(STRIPE_PRICES['enterprise_recurrente'], email_pago, 'enterprise_recurrente', 'subscription', ' Mejorar a Plan Enterprise', 'purchase_3544', type='primary', use_container_width=True)
+        else:
+            if 'webhook_url' not in st.session_state:
+                st.session_state['webhook_url'] = ""
+
+            webhook_input = st.text_input("Endpoint URL", value=st.session_state['webhook_url'], placeholder="https://tuservidor.com/api/webhook")
+            
+            col_w1, col_w2 = st.columns([1, 4])
+            with col_w1:
+                if st.button(" Probar Webhook", type="primary", width='stretch'):
+                    if not webhook_input.startswith("http"):
+                        st.error("La URL debe empezar por http:// o https://")
+                    else:
+                        st.session_state['webhook_url'] = webhook_input
+                        actualizar_usuario_supabase(email_usuario, 'webhook_url', webhook_input)
+                        payload = {"evento": "alerta_critica", "dominio": "test-infra.com", "gravedad": "CRÍTICA", "mensaje": "Este es un evento de prueba enviado desde VulnScan SaaS."}
+                        
+                        with st.spinner("Enviando petición HTTP POST..."):
+                            try:
+                                respuesta = requests.post(webhook_input, json=payload, timeout=5)
+                                if respuesta.status_code in [200, 201, 202, 204]:
+                                    st.success(f"✅ ¡Éxito! El servidor respondió con el código {respuesta.status_code}")
+                                else:
+                                    st.warning(f"⚠️ El servidor recibió el aviso, pero devolvió un error: {respuesta.status_code}")
+                            except Exception as e:
+                                st.error(f"❌ Fallo de conexión. Revisa la URL o el firewall.")
+                                st.markdown("---")
+            st.markdown("---")
+            st.markdown("""
+                <style>
+                input[type=number]::-webkit-inner-spin-button,
+                input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+                input[type=number] { -moz-appearance: textfield; }
+                div[data-testid="stNumberInput"] { margin-top: -10px; }
+                #btn_guardar_scheduler { background-color: #00FFCC !important; color: black !important; }
+                </style>
+            """, unsafe_allow_html=True)
+
+            with st.container():
+                st.markdown("""
+                    <div style='background:#161b22; border:1px solid #30363d; border-radius:12px; padding:20px; margin-bottom:16px;'>
+                        <h3 style='margin:0; color:#f0f6fc; font-size:1.12rem;'>🤖 Monitoreo Automático (Scheduler)</h3>
+                        <p style='margin:8px 0 0 0; color:#8b949e; font-size:0.94rem;'>El scheduler ejecuta escaneos automáticos de tus dominios verificados sin que tengas que hacer nada. Si tienes un webhook configurado, recibirás una alerta cada vez que se detecte una vulnerabilidad nueva.</p>
+                    </div>
+                """, unsafe_allow_html=True)
+
+                scheduler_activo = st.toggle("Activar monitoreo automático", value=st.session_state.get("scheduler_activo", False))
+
+                if scheduler_activo:
+                    col1, col2, col3 = st.columns(3)
+
+                    with col1:
+                        passive_on = st.toggle("🕵️ Escaneo Pasivo (Basic)", value=st.session_state.get("scheduler_passive_on", True), key="toggle_passive")
+                        freq_passive = st.number_input("Cada X días", min_value=1, max_value=30, value=st.session_state.get("scheduler_freq_passive", 7), key="dias_basic", disabled=not passive_on)
+
+                    with col2:
+                        pro_on = st.toggle("🔍 Escaneo Profundo (Pro)", value=st.session_state.get("scheduler_pro_on", False), key="toggle_pro")
+                        freq_pro = st.number_input("Cada X días", min_value=1, max_value=30, value=st.session_state.get("scheduler_freq_pro", 15), key="dias_pro", disabled=not pro_on)
+
+                    with col3:
+                        enterprise_on = st.toggle("🔬 Auditoría OWASP (Enterprise)", value=st.session_state.get("scheduler_enterprise_on", False), key="toggle_enterprise")
+                        freq_enterprise = st.number_input("Cada X días", min_value=1, max_value=30, value=st.session_state.get("scheduler_freq_enterprise", 7), key="dias_ent", disabled=not enterprise_on)
+
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.button(" Guardar configuración de monitoreo", type="primary", use_container_width=True, key="btn_guardar_scheduler"):
+                        actualizar_usuario_supabase(email_usuario, "scheduler_activo", True)
+                        actualizar_usuario_supabase(email_usuario, "scheduler_passive_on", passive_on)
+                        actualizar_usuario_supabase(email_usuario, "scheduler_pro_on", pro_on)
+                        actualizar_usuario_supabase(email_usuario, "scheduler_enterprise_on", enterprise_on)
+                        actualizar_usuario_supabase(email_usuario, "scheduler_freq_passive", freq_passive)
+                        actualizar_usuario_supabase(email_usuario, "scheduler_freq_pro", freq_pro)
+                        actualizar_usuario_supabase(email_usuario, "scheduler_freq_enterprise", freq_enterprise)
+                        st.session_state["scheduler_activo"] = True
+                        st.session_state["scheduler_passive_on"] = passive_on
+                        st.session_state["scheduler_pro_on"] = pro_on
+                        st.session_state["scheduler_enterprise_on"] = enterprise_on
+                        st.session_state["scheduler_freq_passive"] = freq_passive
+                        st.session_state["scheduler_freq_pro"] = freq_pro
+                        st.session_state["scheduler_freq_enterprise"] = freq_enterprise
+                        st.success("✅ Configuración de monitoreo guardada correctamente.")
+                else:
+                    if st.session_state.get("scheduler_activo", False):
+                        actualizar_usuario_supabase(email_usuario, "scheduler_activo", False)
+                        st.session_state["scheduler_activo"] = False
+                    st.info("El monitoreo automático está desactivado. Actívalo para que VulnScan escanee tus dominios automáticamente.")
+    # --- 3. GESTIÓN DE FACTURACIÓN ---
+    with tab_billing:
+        notice = st.session_state.pop('_renewal_notice', None)
+        if notice is not None:
+            message = "Cancelación al finalizar el periodo" if notice else "Renovación reactivada"
+            st.success(_vs_translate(message) + ": " + st.session_state.get('fecha_vencimiento', ''))
+        st.markdown("<div class='config-card'><h3 style='margin:0; color:#f0f6fc; font-size:1.12rem;'>Detalles de Suscripción</h3></div>", unsafe_allow_html=True)
+        
+        if 'cancelacion_pendiente' not in st.session_state:
+            st.session_state['cancelacion_pendiente'] = False
+
+        # Periodo confirmado por Stripe y sincronizado por el webhook.
+        fecha_calculada = st.session_state.get("fecha_vencimiento") or "Pendiente de sincronizar"
+
+        if plan_actual == 'Basic':
+            estado_texto = "GRATUITO"
+            color_estado = "#8b949e"
+            texto_fecha = "Sin caducidad"
+        elif st.session_state['cancelacion_pendiente']:
+            estado_texto = _vs_translate("Cancelación al finalizar el periodo")
+            color_estado = "#FFBD45"
+            texto_fecha = _vs_translate("Acceso hasta") + f": {fecha_calculada}"
+        else:
+            estado_texto = "ACTIVO"
+            color_estado = "#00FFCC"
+            texto_fecha = f"Próxima renovación: {fecha_calculada}"
+
+        st.markdown(f"""
+        <div style="background: linear-gradient(180deg, #161b22 0%, #121820 100%); border: 1px solid #30363d; border-radius: 12px; padding: 25px; margin-bottom: 20px; box-shadow: 0 10px 24px rgba(0,0,0,0.22);">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <div style="color: #8b949e; font-size: 0.9rem; margin-bottom: 5px;">Plan Actual</div>
+                    <div style="color: #ffffff; font-size: 1.8rem; font-weight: bold; font-family: 'Outfit', sans-serif;">{plan_actual}</div>
+                </div>
+                <div style="text-align: right;">
+                    <div style="color: {color_estado}; font-size: 1rem; font-weight: bold;">Estado: {estado_texto}</div>
+                    <div style="color: #8b949e; font-size: 0.85rem;">{texto_fecha}</div>
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        col_b1, col_b2 = st.columns(2)
+        with col_b1:
+            stripe_action(st, label=_vs_translate("Gestionar tarjetas y facturacion"),
+                key="open_billing_portal", scope=st.session_state.get("email_usuario", "") + ':portal',
+                create=lambda attempt: customer_portal(stripe, supabase,
+                    st.session_state.get("email_usuario", ""), payment_return_url(language=st.session_state.get("_vs_lang", "es")),
+                    idempotency_key=attempt),
+                on_error=lambda error: _billing_failure(error, "portal"), width="stretch")
+        with col_b2:
+            email_pago = st.session_state.get("email_usuario", "")
+            usuario_logueado = bool(st.session_state.get("usuario_autenticado")) and bool(email_pago)
+            if usuario_logueado:
+                if plan_actual == 'Pro':
+                    price_id = STRIPE_PRICES['enterprise_recurrente']
+                    tipo_compra = 'enterprise_recurrente'
+                else:
+                    price_id = STRIPE_PRICES['pro_recurrente']
+                    tipo_compra = 'pro_recurrente'
+                _purchase_button(price_id, email_pago, tipo_compra, 'subscription', '⬆ Mejorar a Enterprise' if plan_actual == 'Pro' else '⬆ Mejorar a Plan Pro', 'purchase_3684', type='primary', width='stretch')
+            else:
+                st.info("Inicia sesión para habilitar el pago.")
+            
+        st.markdown("---")
+        with st.expander("Cancelación de la suscripción"):
+            if plan_actual == 'Basic':
+                st.info("Actualmente estás en el plan gratuito. No hay ninguna suscripción activa que cancelar.")
+            
+            elif st.session_state['cancelacion_pendiente']:
+                st.warning("Tu suscripción ya está programada para cancelarse. Seguirás teniendo acceso a tus beneficios premium hasta el final del periodo facturado.")
+                if st.button(" Reactivar Suscripción "):
+                    if _cambiar_renovacion(False):
+                        st.rerun()
+            
+            else:
+                st.warning("Al cancelar, no se te volverán a cobrar más mensualidades. Mantendrás tu acceso Pro/Enterprise y tus API Keys activas hasta el final de tu ciclo de facturación actual.")
+                if st.button("🗑️ Cancelar Renovación"):
+                    if _cambiar_renovacion(True):
+                        st.rerun()
+
+section_loaded("settings")
