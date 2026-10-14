@@ -2,7 +2,7 @@
 import logging
 from pathlib import Path
 
-REVISION='panel-trace-v4'
+REVISION='panel-parallel-v5'
 logging.getLogger('vulnscan.panel').warning('operation=panel_module_loaded revision=%s',REVISION)
 
 
@@ -45,13 +45,17 @@ from time import perf_counter
 from contextvars import ContextVar
 from uuid import uuid4
 import json
+from threading import Lock
 
 _trace = ContextVar('panel_trace', default=None)
 
 
 def begin_panel_trace(start=None):
+    previous = _trace.get()
+    if previous is not None and previous.get('pdf_reads') is not None:
+        previous.pop('pdf_reads').close()
     trace = {'run': uuid4().hex[:12], 'start': perf_counter() if start is None else start,
-             'phases': {}, 'counts': {}}
+             'phases': {}, 'counts': {}, 'lock': Lock()}
     if start is not None:
         elapsed = round((perf_counter()-start)*1000)
         trace['phases']['imports'] = {'calls': 1, 'ms': elapsed, 'max_ms': elapsed,
@@ -70,6 +74,8 @@ def finish_panel_trace():
     trace = _trace.get()
     if trace is None:
         return
+    if trace.get('pdf_reads') is not None:
+        trace.pop('pdf_reads').close()
     payload = {'revision': REVISION, 'run': trace['run'],
                'total_ms': round((perf_counter()-trace['start'])*1000),
                'nested_timings': True, 'counts': trace['counts'], 'phases': trace['phases']}
@@ -92,6 +98,41 @@ def panel_execute(query, phase):
     with measure_panel(phase):
         return query.execute()
 
+
+def pdf_read(client, report):
+    trace = _trace.get()
+    if trace is None:
+        return panel_execute(client.rpc('billing_authorize_pdf',
+                             {'p_report': str(report), 'p_consume': False}),
+                             'supabase.billing_authorize_pdf').data
+    from panel_read_pipeline import PdfReadBatch
+    batch = trace.get('pdf_reads')
+    if batch is None or batch.client is not client:
+        if batch is not None:
+            batch.close()
+        batch = trace['pdf_reads'] = PdfReadBatch(client, panel_execute)
+    return batch.read(report)
+
+
+def prefetch_pdf_reads(client, reports):
+    trace = _trace.get()
+    if trace is None:
+        return
+    from panel_read_pipeline import PdfReadBatch
+    batch = trace.get('pdf_reads')
+    if batch is None or batch.client is not client:
+        if batch is not None:
+            batch.close()
+        batch = trace['pdf_reads'] = PdfReadBatch(client, panel_execute)
+    batch.prefetch(reports)
+
+
+def invalidate_pdf_read(client, report):
+    trace = _trace.get()
+    batch = trace.get('pdf_reads') if trace else None
+    if batch is not None and batch.client is client:
+        batch.invalidate(report)
+
 @contextmanager
 def measure_panel(operation):
     start = perf_counter()
@@ -101,13 +142,14 @@ def measure_panel(operation):
     finally:
         elapsed = round((perf_counter()-start)*1000)
         if trace is not None:
-            stats = trace['phases'].setdefault(operation, {
-                'calls': 0, 'ms': 0, 'max_ms': 0,
-                'start_ms': round((start-trace['start'])*1000), 'end_ms': 0})
-            stats['calls'] += 1
-            stats['ms'] += elapsed
-            stats['max_ms'] = max(stats['max_ms'], elapsed)
-            stats['end_ms'] = round((perf_counter()-trace['start'])*1000)
+            with trace['lock']:
+                stats = trace['phases'].setdefault(operation, {
+                    'calls': 0, 'ms': 0, 'max_ms': 0,
+                    'start_ms': round((start-trace['start'])*1000), 'end_ms': 0})
+                stats['calls'] += 1
+                stats['ms'] += elapsed
+                stats['max_ms'] = max(stats['max_ms'], elapsed)
+                stats['end_ms'] = max(stats['end_ms'], round((perf_counter()-trace['start'])*1000))
         logging.getLogger('vulnscan.panel').warning(
             'operation=panel_timing phase=%s elapsed_ms=%d revision=%s',
             operation, round((perf_counter()-start)*1000), REVISION)

@@ -1,6 +1,6 @@
 import ast
 from pathlib import Path
-from panel_diagnostics import panel_execute, measure_panel
+from panel_diagnostics import panel_execute, measure_panel, pdf_read, invalidate_pdf_read
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock
@@ -147,7 +147,7 @@ class BillingTests(unittest.TestCase):
             stripe.Subscription.modify.side_effect = RuntimeError("simulated failure")
             state = {"email_usuario": "a@example.test", "cancelacion_pendiente": False, "tokens_pdf": 0}
             ui = SimpleNamespace(session_state=state, error=Mock())
-            namespace = {"panel_execute": panel_execute, "measure_panel": measure_panel, "st": ui, "stripe": stripe, "supabase": db, "change_subscription": change_subscription}
+            namespace = {"panel_execute": panel_execute, "pdf_read": pdf_read, "invalidate_pdf_read": invalidate_pdf_read, "measure_panel": measure_panel, "st": ui, "stripe": stripe, "supabase": db, "change_subscription": change_subscription}
             exec(compile(ast.Module(body=[fn], type_ignores=[]), filename, "exec"), namespace)
             before = dict(state)
             self.assertFalse(namespace["_cambiar_renovacion"](True))
@@ -170,7 +170,7 @@ class BillingTests(unittest.TestCase):
             fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_confirmar_compra_pdf_tras_stripe")
             state = {"tokens_pdf": 0, "reporte_pdf_desbloqueado": None}
             load, restore = Mock(), Mock()
-            namespace = {"panel_execute": panel_execute, "measure_panel": measure_panel, "supabase": client(), "refresh_payment_return": refresh_payment_return,
+            namespace = {"panel_execute": panel_execute, "pdf_read": pdf_read, "invalidate_pdf_read": invalidate_pdf_read, "measure_panel": measure_panel, "supabase": client(), "refresh_payment_return": refresh_payment_return,
                          "cargar_perfil_usuario": load, "restaurar_ultimo_escaneo_supabase": restore}
             exec(compile(ast.Module(body=[fn], type_ignores=[]), filename, "exec"), namespace)
             namespace["_confirmar_compra_pdf_tras_stripe"]("a@example.test")
@@ -204,7 +204,7 @@ class BillingTests(unittest.TestCase):
                     query_params={"pago": "exitoso", "email": "b@example.test"},
                     warning=Mock(), info=Mock())
                 refresh = Mock()
-                namespace = {"panel_execute": panel_execute, "measure_panel": measure_panel, "st": ui, "pago_param": "exitoso",
+                namespace = {"panel_execute": panel_execute, "pdf_read": pdf_read, "invalidate_pdf_read": invalidate_pdf_read, "measure_panel": measure_panel, "st": ui, "pago_param": "exitoso",
                              "_confirmar_compra_pdf_tras_stripe": refresh}
                 exec(compile(ast.Module(body=[branch], type_ignores=[]), filename, "exec"), namespace)
                 self.assertEqual(state["email_usuario"], "a@example.test")
@@ -218,7 +218,7 @@ class BillingTests(unittest.TestCase):
         stripe, db = stripe_mock(), client()
         db.table.return_value.select.return_value.eq.return_value.execute.return_value.data = []
         stripe.checkout.Session.create.return_value.url = "https://checkout.example.test"
-        namespace = {"panel_execute": panel_execute, "measure_panel": measure_panel, "stripe": stripe, "supabase": db, "authenticated_user": __import__("billing").authenticated_user,
+        namespace = {"panel_execute": panel_execute, "pdf_read": pdf_read, "invalidate_pdf_read": invalidate_pdf_read, "measure_panel": measure_panel, "stripe": stripe, "supabase": db, "authenticated_user": __import__("billing").authenticated_user,
                      "STRIPE_PRICES": {"pro_recurrente": "price_test"},
                      "os": SimpleNamespace(getenv=lambda key, default: default)}
         exec(compile(ast.Module(body=[fn], type_ignores=[]), "app.py", "exec"), namespace)
@@ -248,7 +248,7 @@ class BillingTests(unittest.TestCase):
                     self.assertNotIn('payment_method_configuration', kwargs)
                     return SimpleNamespace(url='https://example.invalid/test-checkout')
                 stripe.checkout.Session.create.side_effect = create
-                namespace = {"panel_execute": panel_execute, "measure_panel": measure_panel, 'stripe': stripe, 'supabase': db,
+                namespace = {"panel_execute": panel_execute, "pdf_read": pdf_read, "invalidate_pdf_read": invalidate_pdf_read, "measure_panel": measure_panel, 'stripe': stripe, 'supabase': db,
                     'authenticated_user': __import__('billing').authenticated_user,
                     'STRIPE_PRICES': catalog,
                     'os': SimpleNamespace(getenv=lambda key, default: default)}
@@ -300,7 +300,7 @@ class BillingTests(unittest.TestCase):
             fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_descargar_pdf_seguro")
             db = client(); db.rpc.return_value.execute.side_effect = RuntimeError("simulated")
             ui = SimpleNamespace(session_state={"escaneo_actual_id": "42"}, warning=Mock(), download_button=Mock())
-            namespace = {"panel_execute": panel_execute, "measure_panel": measure_panel, "supabase": db, "st": ui}
+            namespace = {"panel_execute": panel_execute, "pdf_read": pdf_read, "invalidate_pdf_read": invalidate_pdf_read, "measure_panel": measure_panel, "supabase": db, "st": ui}
             exec(compile(ast.Module(body=[fn], type_ignores=[]), filename, "exec"), namespace)
             self.assertFalse(namespace["_descargar_pdf_seguro"](data=b"pdf", file_name="test.pdf"))
             ui.download_button.assert_not_called()
@@ -310,7 +310,7 @@ class BillingTests(unittest.TestCase):
         fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "generar_link_pago")
         stripe, db = stripe_mock(), client()
         stripe.billing_portal.Session.create.return_value.url = "https://portal.example.test"
-        namespace = {"panel_execute": panel_execute, "measure_panel": measure_panel, "stripe": stripe, "supabase": db, "authenticated_user": __import__("billing").authenticated_user,
+        namespace = {"panel_execute": panel_execute, "pdf_read": pdf_read, "invalidate_pdf_read": invalidate_pdf_read, "measure_panel": measure_panel, "stripe": stripe, "supabase": db, "authenticated_user": __import__("billing").authenticated_user,
                      "STRIPE_PRICES": {"pro_recurrente": "price_test"},
                      "os": SimpleNamespace(getenv=lambda key, default: default)}
         exec(compile(ast.Module(body=[fn], type_ignores=[]), "app.py", "exec"), namespace)

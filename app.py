@@ -48,10 +48,11 @@ from payment_urls import payment_return_url
 from scan_reservation import run_reserved_scan, store_scan
 import panel_diagnostics as _panel_diagnostics_module
 # Cloud can retain the previous helper module during a hot code update.
-if (getattr(_panel_diagnostics_module, "REVISION", None) != "panel-trace-v4"
+if (getattr(_panel_diagnostics_module, "REVISION", None) != "panel-parallel-v5"
         or not all(hasattr(_panel_diagnostics_module, name) for name in ("measure_panel", "cached_pdf"))):
     importlib.reload(_panel_diagnostics_module)
-from panel_diagnostics import log_panel_failure, section_loaded, feed_item, measure_panel, cached_pdf, begin_panel_trace, finish_panel_trace, panel_count, panel_execute
+from panel_diagnostics import log_panel_failure, section_loaded, feed_item, measure_panel, cached_pdf, begin_panel_trace, finish_panel_trace, panel_count, panel_execute, pdf_read, prefetch_pdf_reads, invalidate_pdf_read
+from panel_read_pipeline import PUBLIC_FEED
 begin_panel_trace(_panel_entry_started)
 from motores import _motor_basic_pasivo, _motor_pro_activo, _motor_enterprise_owasp
 
@@ -788,7 +789,7 @@ def _confirmar_compra_pdf_tras_stripe(email):
 
 def _pdf_desbloqueado_servidor(report_id):
     try:
-        result = panel_execute(supabase.rpc("billing_authorize_pdf", {"p_report": str(report_id), "p_consume": False}), 'supabase.billing_authorize_pdf').data
+        result = pdf_read(supabase, report_id)
         return bool(result and result.get("authorized"))
     except Exception:
         return False
@@ -796,16 +797,19 @@ def _pdf_desbloqueado_servidor(report_id):
 
 def _descargar_pdf_seguro(*args, report_id=None, **kwargs):
     report = str(report_id or st.session_state.get("escaneo_actual_id", ""))
+    consumed = False
     try:
-        result = panel_execute(supabase.rpc("billing_authorize_pdf", {"p_report": report, "p_consume": False}), 'supabase.billing_authorize_pdf').data
+        result = pdf_read(supabase, report)
         if not result or not result.get("authorized"):
             widget_key = "pdf_autorizar_" + str(kwargs.get("key") or report)
             if not st.button("Desbloquear PDF (1 credito)", key=widget_key, use_container_width=True):
                 return False
             result = panel_execute(supabase.rpc("billing_authorize_pdf", {"p_report": report, "p_consume": True}), 'supabase.billing_authorize_pdf').data
+            invalidate_pdf_read(supabase, report)
+            consumed = True
             if not result or not result.get("authorized"):
                 raise ValueError("No autorizado")
-        if result.get("remaining") is not None:
+        if consumed and result.get("remaining") is not None:
             st.session_state["tokens_pdf"] = result["remaining"]
         st.session_state["reporte_pdf_desbloqueado"] = report
     except Exception:
@@ -2023,6 +2027,8 @@ if st.session_state.get('usuario_autenticado'):
     with measure_panel("billing_monitor_initial"):
         billing_monitor(st, supabase)
 
+_panel_feed_job = PUBLIC_FEED.start()
+
 with st.sidebar, measure_panel("sidebar"):
     if st.button("Cerrar Sesión"):
         try:
@@ -3212,6 +3218,7 @@ with menu_reportes, measure_panel("reports"):
     elif len(historial_filtrado) == 0:
         st.info("🔍 No se han encontrado reportes que coincidan con los filtros.")
     else:
+        prefetch_pdf_reads(supabase, [r["id"] for r in historial_filtrado if r.get("id") is not None])
         sub_tab_recientes, sub_tab_todos = st.tabs(["⚡ Resultados Filtrados", "📂 Historial Completo"], on_change="ignore")
 
         def pintar_reporte(rep, index, sufijo):
@@ -3423,19 +3430,15 @@ with menu_amenazas, measure_panel("threats"):
     st.markdown("<h3 class='threat-section-title'>🔴 Live Threat Feed: Vulnerabilidades Detectadas Hoy</h3>", unsafe_allow_html=True)
     st.markdown("<p class='threat-section-sub'>Conexión en tiempo real con fuentes globales de inteligencia para priorizar parches en función de criticidad.</p>", unsafe_allow_html=True)
 
-    @st.cache_data(ttl=3600)
     def obtener_inteligencia_real():
         try:
-            url = "https://cve.circl.lu/api/last"
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-            with measure_panel("threat_feed_read"):
-                respuesta = requests.get(url, headers=headers, timeout=(3, 8))
-            if respuesta.status_code == 200:
-                with measure_panel("threat_feed_decode"):
-                    return respuesta.json()[:6]
-        except:
+            with measure_panel("threat_feed_wait"):
+                data = _panel_feed_job.result()
+            if data:
+                return data
+        except Exception:
             pass
-        
+
         return [
             {"id": "CVE-2024-3400", "cvss": "10.0", "summary": "Vulnerabilidad crítica en Palo Alto Networks PAN-OS. Permite a un atacante no autenticado ejecutar código remoto."},
             {"id": "CVE-2024-3094", "cvss": "10.0", "summary": "Puerta trasera maliciosa descubierta en la utilidad XZ Utils de Linux. Compromete SSH."},

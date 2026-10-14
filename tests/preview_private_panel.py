@@ -24,7 +24,8 @@ import requests
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from billing import *
-from panel_diagnostics import log_panel_failure, section_loaded, feed_item, measure_panel, cached_pdf, begin_panel_trace, finish_panel_trace, panel_count, panel_execute
+from panel_diagnostics import log_panel_failure, section_loaded, feed_item, measure_panel, cached_pdf, begin_panel_trace, finish_panel_trace, panel_count, panel_execute, pdf_read, prefetch_pdf_reads, invalidate_pdf_read
+from panel_read_pipeline import PUBLIC_FEED
 from stripe_navigation import stripe_action
 import stripe_navigation
 if st.query_params.get("real_bridge") != "1":
@@ -97,6 +98,9 @@ namespace = dict(globals(), __file__=str(ROOT / "app.py"), supabase=Client(),
                  stripe=SimpleNamespace(checkout=SimpleNamespace(Session=SimpleNamespace(create=fake_checkout))), STRIPE_PRICES=price_catalog(), _VS_TRANSLATIONS={})
 definitions = [node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.ClassDef))]
 exec(compile(ast.Module(body=definitions, type_ignores=[]), str(ROOT / "app.py"), "exec"), namespace)
+from concurrent.futures import Future
+feed_future=Future(); feed_future.set_result([])
+namespace["_panel_feed_job"]=feed_future
 namespace.update(escanear_objetivo_real=blocked, comprobar_archivo_servidor=blocked,
                  restaurar_ultimo_escaneo_supabase=lambda *args: False,
                  _descargar_pdf_seguro=lambda **kwargs: st.download_button(**kwargs))

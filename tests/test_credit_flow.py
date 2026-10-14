@@ -1,6 +1,6 @@
 import ast
 from pathlib import Path
-from panel_diagnostics import panel_execute, measure_panel
+from panel_diagnostics import panel_execute, measure_panel, pdf_read, invalidate_pdf_read
 from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock
@@ -35,7 +35,7 @@ class CreditFlowTests(TestCase):
         db.rpc.return_value.execute.side_effect = [SimpleNamespace(data=r) for r in response]
         ui = SimpleNamespace(session_state=state, button=Mock(return_value=clicked),
                              download_button=Mock(return_value=True), warning=Mock())
-        namespace = {"st": ui, "supabase": db, "panel_execute": panel_execute, "measure_panel": measure_panel}
+        namespace = {"st": ui, "supabase": db, "panel_execute": panel_execute, "pdf_read": pdf_read, "invalidate_pdf_read": invalidate_pdf_read, "measure_panel": measure_panel}
         exec(compile(ast.Module(body=[fn], type_ignores=[]), filename, "exec"), namespace)
         return namespace["_descargar_pdf_seguro"], ui, db
 
@@ -66,6 +66,13 @@ class CreditFlowTests(TestCase):
         self.assertTrue(fn(data=b"pdf"))
         self.assertEqual(db.rpc.call_count, 1)
         ui.button.assert_not_called()
+
+    def test_read_snapshot_cannot_restore_a_previously_consumed_balance(self):
+        fn, ui, db = self.pdf_function("app.py", {"tokens_pdf": 0, "escaneo_actual_id": "42"},
+                                    [{"authorized": True, "remaining": 1}])
+        self.assertTrue(fn(data=b"pdf"))
+        self.assertEqual(ui.session_state['tokens_pdf'], 0)
+        self.assertEqual(db.rpc.call_count, 1)
 
     def test_failed_explicit_authorization_does_not_serve_pdf(self):
         fn, ui, db = self.pdf_function("app.py", {"tokens_pdf": 1, "escaneo_actual_id": "42"},
