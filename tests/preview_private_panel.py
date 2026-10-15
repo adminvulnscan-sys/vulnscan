@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROOT))
 from billing import *
 from panel_diagnostics import log_panel_failure, section_loaded, feed_item, measure_panel, cached_pdf, begin_panel_trace, finish_panel_trace, panel_count, panel_execute, pdf_read, prefetch_pdf_reads, invalidate_pdf_read
 from panel_read_pipeline import PUBLIC_FEED
+from report_downloads import deferred_report
 from stripe_navigation import stripe_action
 import stripe_navigation
 if st.query_params.get("real_bridge") != "1":

@@ -17,7 +17,7 @@ def intent_bridge(**kwargs):
     return _bridge(**kwargs)
 
 
-def stripe_action(ui, *, label, key, scope, create, on_error, **options):
+def _stripe_action(ui, *, label, key, scope, create, on_error, **options):
     """No Stripe call on rendering; retries use the browser's stable attempt ID."""
     scope_hash = hashlib.sha256(scope.encode()).hexdigest()
     pending_key = '_stripe_redirect_' + key
@@ -65,3 +65,15 @@ def stripe_action(ui, *, label, key, scope, create, on_error, **options):
         intent_bridge(key='stripe_failure_' + key,
             data={'scope': scope_hash, 'failed': True}, height=0,
             on_intent_change=lambda: None, on_redirect_error_change=lambda: None)
+
+
+# Component readiness updates must not rebuild all preloaded tabs. Checkout
+# still explicitly reruns the app after a deliberate purchase click, as before.
+_stripe_action_fragment = st.fragment(_stripe_action)
+
+
+def stripe_action(ui, **options):
+    if ui is st:
+        return _stripe_action_fragment(ui, **options)
+    # Preserve the same controller for isolated non-Streamlit test clients.
+    return _stripe_action(ui, **options)

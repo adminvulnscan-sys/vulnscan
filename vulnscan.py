@@ -48,11 +48,12 @@ from payment_urls import payment_return_url
 from scan_reservation import run_reserved_scan, store_scan
 import panel_diagnostics as _panel_diagnostics_module
 # Cloud can retain the previous helper module during a hot code update.
-if (getattr(_panel_diagnostics_module, "REVISION", None) != "panel-parallel-v5"
+if (getattr(_panel_diagnostics_module, "REVISION", None) != "panel-429-v6"
         or not all(hasattr(_panel_diagnostics_module, name) for name in ("measure_panel", "cached_pdf"))):
     importlib.reload(_panel_diagnostics_module)
 from panel_diagnostics import log_panel_failure, section_loaded, feed_item, measure_panel, cached_pdf, begin_panel_trace, finish_panel_trace, panel_count, panel_execute, pdf_read, prefetch_pdf_reads, invalidate_pdf_read
 from panel_read_pipeline import PUBLIC_FEED
+from report_downloads import deferred_report
 begin_panel_trace(_panel_entry_started)
 from motores import _motor_basic_pasivo, _motor_pro_activo, _motor_enterprise_owasp
 
@@ -1526,6 +1527,21 @@ def _clasificar_hallazgos_pdf(lineas):
         else:
             resto.append(linea)
     return fallos, aciertos, resto
+
+
+def _report_pdf_bytes(rep):
+    dominio = rep.get("dominio", "Desconocido")
+    fecha = rep.get("fecha", "Hoy")
+    riesgo = rep.get("riesgo", "Medio")
+    with measure_panel("report_normalize"):
+        resultados_rep = _normalizar_lineas_resultado(
+            rep.get("resultados") or rep.get("resultados_json")
+        )
+        resultados_rep = [r.replace('\u2192', '->').replace('\u2014', '-').replace('\u2013', '-') for r in resultados_rep]
+        if not resultados_rep:
+            resultados_rep = [f"✅ Dominio analizado: {dominio}", f"📅 Fecha: {fecha}", f"⚠️ Nivel de riesgo: {riesgo}"]
+        resultados_rep_limpios = [r.replace('\U0001f7e1', '').replace('\U0001f7e0', '').replace('\U0001f534', '').replace('\U0001f7e2', '').replace('\u26aa', '') if isinstance(r, str) else r for r in resultados_rep]
+    return _crear_pdf_sin_cache(dominio, resultados_rep_limpios)
 
 
 def crear_pdf(dominio, resultados, nivel='Rápido (Passive)'):
@@ -3178,9 +3194,15 @@ with menu_reportes, measure_panel("reports"):
     email_usuario = st.session_state.get('email_usuario', '')
     try:
         with measure_panel("history_read"):
-            respuesta = panel_execute(supabase.table("escaneos").select("*").eq("email_cliente", email_usuario), 'supabase.escaneos')
+            history_fields = ("id,email_cliente,dominio,tipo,fecha,riesgo"
+                              if st.session_state.get("plan_activo") in ("Pro", "Enterprise") else "*")
+            if history_fields != "*" and any(r.get("created_at") is not None
+                    for r in st.session_state.get("historial_escaneos", [])):
+                history_fields += ",created_at"
+            respuesta = panel_execute(supabase.table("escaneos").select(history_fields).eq("email_cliente", email_usuario), 'supabase.escaneos')
         historial_real = list(reversed(respuesta.data))
         panel_count("history_reports", len(historial_real))
+        panel_count("history_metadata_only", int(history_fields != "*"))
         panel_count("history_structured_reports", sum(isinstance(r.get("resultados_json"), (list, dict)) for r in historial_real))
     except Exception as e:
         historial_real = []
@@ -3218,7 +3240,8 @@ with menu_reportes, measure_panel("reports"):
     elif len(historial_filtrado) == 0:
         st.info("🔍 No se han encontrado reportes que coincidan con los filtros.")
     else:
-        prefetch_pdf_reads(supabase, [r["id"] for r in historial_filtrado if r.get("id") is not None])
+        if st.session_state.get("plan_activo") not in ("Pro", "Enterprise"):
+            prefetch_pdf_reads(supabase, [r["id"] for r in historial_filtrado if r.get("id") is not None])
         sub_tab_recientes, sub_tab_todos = st.tabs(["⚡ Resultados Filtrados", "📂 Historial Completo"], on_change="ignore")
 
         def pintar_reporte(rep, index, sufijo):
@@ -3243,7 +3266,14 @@ with menu_reportes, measure_panel("reports"):
                         token_usado_key = f"token_usado_{reporte_id}"
 
                         reporte_desbloqueado = st.session_state.get("reporte_pdf_desbloqueado", None)
-                        if plan_rep in ['Pro', 'Enterprise'] or tokens_pdf > 0 or _pdf_desbloqueado_servidor(reporte_id):
+                        if plan_rep in ['Pro', 'Enterprise'] and rep.get('id') is not None:
+                            st.download_button(
+                                label="\U0001f4c4 Descargar Reporte PDF",
+                                data=deferred_report(supabase, email_pago, rep, _report_pdf_bytes),
+                                file_name=f"reporte_{dominio}.pdf", mime="application/pdf",
+                                key=f"dl_pdf_{sufijo}_{index}", use_container_width=True,
+                                type="primary", on_click="ignore")
+                        elif tokens_pdf > 0 or _pdf_desbloqueado_servidor(reporte_id):
                             with measure_panel("report_normalize"):
                                 resultados_rep = _normalizar_lineas_resultado(
                                     rep.get("resultados") or rep.get("resultados_json")

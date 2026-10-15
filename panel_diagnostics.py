@@ -2,7 +2,7 @@
 import logging
 from pathlib import Path
 
-REVISION='panel-parallel-v5'
+REVISION='panel-429-v6'
 logging.getLogger('vulnscan.panel').warning('operation=panel_module_loaded revision=%s',REVISION)
 
 

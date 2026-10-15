@@ -1,3 +1,6 @@
+> Revision actual: `panel-429-v6`. La correccion con 429 informes se describe
+> al final; las secciones anteriores conservan la evidencia historica.
+
 # Medición de carga del panel
 
 Revisión `panel-trace-v4`. Las pestañas siguen precargadas con
@@ -78,3 +81,47 @@ mas feed sincrono despues de Reportes. El parche reduce el camino critico
 solapando trabajo, sin saltarse autorizaciones o mover carga al primer clic.
 La rapidez de la cuenta publicada sigue pendiente de confirmacion. No se
 restaura codigo antiguo ni se cambian esquema, reservas, webhook o facturacion.
+
+
+## Correccion con el volumen confirmado: panel-429-v6
+
+Git 4245f5a ya utilizaba pesta?as precargadas; se mantiene ese recorrido, sin
+restaurar el proyecto antiguo. La preparacion completa del archivo historico
+se elimina del inicio para Pro/Enterprise, incluida la cuenta interna admin.
+La lista conserva todos sus registros, estilos, filtros y botones; consulta
+solo metadatos (y created_at cuando consta en el ultimo informe recuperado).
+No descarga los resultados JSON de 429 informes ni genera sus archivos PDF.
+
+Se usa la descarga diferida nativa disponible en Streamlit 1.57, comprobada
+con el paquete instalado y en Chrome. Cada clic verifica nuevamente la
+identidad autenticada y billing_authorize_pdf(p_consume=false). Solo entonces
+lee el informe completo, limitado por ID y propietario, valida ambos campos
+y genera el PDF con los mismos normalizadores y formato. No consume creditos
+ni almacena permisos. Dos descargas vuelven a comprobar el servidor. Las
+rutas Basic de compra/desbloqueo y sus consumos explicitos no se sustituyen.
+Esto difiere la preparacion de un archivo solicitado, NO carga pesta?as al
+abrirlas ni mueve el trabajo del archivo historico a otro punto del inicio.
+
+En Chrome se reprodujo ademas que la inicializacion de componentes de compra
+podia provocar ejecuciones completas adicionales. stripe_action conserva su
+controlador de Checkout sin cambios (AST comparada contra HEAD anterior),
+pero su renderizado utiliza un fragmento. Las actualizaciones de preparacion
+se limitan al control; una compra explicita conserva su rerun y todas sus
+validaciones, idempotencia y navegacion. No se modifica JavaScript de Stripe,
+webhook, esquema, reservas, saldos ni planes.
+
+Comparacion local completa con 429 informes ficticios estructurados, 150
+hallazgos cada uno, RPC simulada100ms y feed1s, cache frio: 12187 -> 2013ms
+hasta Configuracion (AppTest total externo 12475 -> 2230ms). PDFs preparados
+al iniciar: 430 -> 1 (Dashboard); lecturas PDF: 429 -> 1. No son mediciones de
+la cuenta publicada ni datos reales del usuario, aunque igualan su volumen.
+Chrome con los 429 informes: diez cambios de pesta?a, contador del servidor
+constante, 13-178ms incluyendo CDP/frames; descarga efectiva de PDF valido
+(4341bytes ficticios), sin nueva ejecucion del panel. Las verificaciones
+iniciales del marcador HTML se corrigieron para no confundir virtualizacion
+fuera de pantalla ni sesiones previas con ejecuciones de esta prueba.
+
+Suite final: 140 pruebas aprobadas, incluido rechazo de fila/propietario
+incorrecto; ejecucion completa final registrada localmente.
+Pendiente: confirmar mejora autenticada publicada con revision panel-429-v6.
+No se han realizado pagos, motores ni escrituras remotas.

@@ -66,6 +66,10 @@ with ExitStack() as stack:
         assert any(b.disabled and 'Generar Key' in b.label for b in app.button)
     for section in ('reports','threats','settings'):
         assert 'operation=panel_section_loaded section='+section in logs.getvalue()
+    if mode=='volume429':
+        assert '"history_reports":429' in logs.getvalue()
+        # Two renders (initial + search): only the visible Dashboard PDF reads.
+        assert sum(n=='billing_authorize_pdf' for n,p in rpc_calls)<=2
     assert not writes
     assert all(call[0] not in ('billing_spend','billing_scan_claim','billing_scan_store') and call[1].get('p_consume') is not True for call in rpc_calls)
     checkout.assert_not_called();modify.assert_not_called()
@@ -89,3 +93,6 @@ class AuthenticatedPanelTests(unittest.TestCase):
     def test_pdf_failure_is_local_and_logs_no_payload(self):self.check_mode('pdf_failure')
     def test_basic_api_restrictions_are_preserved(self):self.check_mode('basic')
     def test_second_entry_point(self):self.check_mode('structured','vulnscan.py')
+
+    def test_all_sections_preloaded_with_429_structured_reports_without_archive_rpc_fanout(self):
+        self.check_mode('volume429')
