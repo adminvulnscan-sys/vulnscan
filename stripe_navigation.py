@@ -21,25 +21,31 @@ def _stripe_action(ui, *, label, key, scope, create, on_error, **options):
     """No Stripe call on rendering; retries use the browser's stable attempt ID."""
     scope_hash = hashlib.sha256(scope.encode()).hexdigest()
     pending_key = '_stripe_redirect_' + key
-    pending = ui.session_state.pop(pending_key, {})
+    pending = ui.session_state.get(pending_key, {})
     bridge_key = 'stripe_bridge_' + key
     known_intent = ui.session_state.get(bridge_key, {}).get('intent')
     result = intent_bridge(key=bridge_key,
         data={'scope': scope_hash, 'button_key': key, 'known_intent': known_intent,
               'checkout': (ui.session_state.get('_billing_open_checkout') or {}).get('checkout'),
               'language': ui.session_state.get('_vs_lang', 'es'), **pending}, height=0,
-        on_intent_change=lambda: None, on_redirect_error_change=lambda: None)
+        on_intent_change=lambda: None, on_redirect_error_change=lambda: None,
+        on_navigation_done_change=lambda: None, on_purchase_change=lambda: None)
+    if pending.get('navigation') and getattr(result, 'navigation_done', None) == pending['navigation']:
+        ui.session_state.pop(pending_key, None)
+        pending = {}
     if getattr(result, 'redirect_error', False):
         ui.error('No se pudo abrir Stripe. Permite las ventanas emergentes de esta web y vuelve a pulsar el mismo botón.'
                  if ui.session_state.get('_vs_lang', 'es') != 'en' else
                  'Could not open Stripe. Allow pop-ups for this website and click the same button again.')
-    intent = pending.get('rotate') or getattr(result, 'intent', None)
+    purchase = getattr(result, 'purchase', None)
+    intent = pending.get('rotate') or purchase or getattr(result, 'intent', None) or known_intent
     try:
         intent = str(UUID(intent))
     except (ValueError, TypeError, AttributeError):
         intent = None
-    disabled = bool(options.pop('disabled', False)) or intent is None
-    if not ui.button(label, key=key, disabled=disabled, **options):
+    disabled = bool(options.pop('disabled', False))
+    clicked = ui.button(label, key=key, disabled=disabled, **options)
+    if disabled or not (purchase or clicked) or intent is None:
         return
     try:
         rotated = None
@@ -63,7 +69,7 @@ def _stripe_action(ui, *, label, key, scope, create, on_error, **options):
         on_error(error)
         # Deliver failure to the already-mounted bridge without hiding the error.
         intent_bridge(key='stripe_failure_' + key,
-            data={'scope': scope_hash, 'failed': True}, height=0,
+            data={'scope': scope_hash, 'button_key': key, 'failed': True}, height=0,
             on_intent_change=lambda: None, on_redirect_error_change=lambda: None)
 
 
@@ -74,6 +80,9 @@ _stripe_action_fragment = st.fragment(_stripe_action)
 
 def stripe_action(ui, **options):
     if ui is st:
-        return _stripe_action_fragment(ui, **options)
+        # Fragment identity includes its container path, not its arguments.
+        # Sibling purchase buttons need distinct paths to retain their state.
+        with st.container(key='billing_control_' + options['key']):
+            return _stripe_action_fragment(ui, **options)
     # Preserve the same controller for isolated non-Streamlit test clients.
     return _stripe_action(ui, **options)

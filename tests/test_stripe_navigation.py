@@ -67,10 +67,32 @@ class NavigationTests(unittest.TestCase):
         self.assertIn('rotate', ui.session_state['_stripe_redirect_buy'])
 
     @patch.object(navigation, 'intent_bridge', return_value=SimpleNamespace(intent=None))
-    def test_button_waits_for_browser_intent(self, bridge):
+    def test_readiness_never_disables_button_or_creates_checkout(self, bridge):
         ui, create, errors = self.ui(), Mock(), Mock()
         self.action(ui, create, errors)
-        self.assertTrue(ui.button.call_args.kwargs['disabled'])
+        self.assertFalse(ui.button.call_args.kwargs['disabled'])
+        create.assert_not_called()
+
+    @patch.object(navigation, 'intent_bridge', return_value=SimpleNamespace(purchase=INTENT))
+    def test_browser_click_trigger_runs_validated_controller(self, bridge):
+        ui, create, errors = self.ui(), Mock(return_value='https://checkout.stripe.com/test'), Mock()
+        with self.assertRaises(Rerun):
+            self.action(ui, create, errors)
+        self.assertTrue(create.call_args.args[0].endswith(INTENT))
+        errors.assert_not_called()
+
+    @patch.object(navigation, 'intent_bridge', return_value=SimpleNamespace(purchase='invalid'))
+    def test_invalid_browser_trigger_cannot_create_checkout(self, bridge):
+        ui, create, errors = self.ui(), Mock(), Mock()
+        self.action(ui, create, errors)
+        create.assert_not_called()
+
+    @patch.object(navigation, 'intent_bridge', return_value=SimpleNamespace(navigation_done='done'))
+    def test_navigation_ack_clears_pending_without_stripe_call(self, bridge):
+        ui, create, errors = self.ui(), Mock(), Mock()
+        ui.session_state['_stripe_redirect_buy'] = {'url':'https://checkout.stripe.com/test','navigation':'done'}
+        self.action(ui, create, errors)
+        self.assertNotIn('_stripe_redirect_buy', ui.session_state)
         create.assert_not_called()
 
     def test_checkout_idempotency_binds_user_product_and_preserves_contract(self):

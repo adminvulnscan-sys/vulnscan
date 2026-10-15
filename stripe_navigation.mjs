@@ -1,6 +1,7 @@
 // Open a separate top-level tab during the user's click. Never navigate the
 // Streamlit document: Community Cloud may host it inside its own shell/frame.
-const tabs = new Map();
+const tabs = globalThis[Symbol.for('vulnscan.stripeTabs')] ||= new Map();
+const attempts = globalThis[Symbol.for('vulnscan.stripeAttempts')] ||= new Map();
 const checkoutTabs = globalThis[Symbol.for('vulnscan.checkoutTabs')] ||= new Map();
 const returnWatchers = globalThis[Symbol.for('vulnscan.returnWatchers')] ||= new Map();
 export function watchReturn(tab, checkout) {
@@ -27,13 +28,23 @@ export function watchReturn(tab, checkout) {
   returnWatchers.set(checkout, timer);
 }
 export default function ({data, setStateValue, setTriggerValue}) {
-  const fail = () => setTriggerValue('redirect_error', true);
+  const selector = data.button_key ? `.st-key-${CSS.escape(data.button_key)}` : null;
+  const progress = active => {
+    const button = selector && document.querySelector?.(`${selector} button`);
+    if (!button) return;
+    button.querySelector('[data-billing-progress]')?.remove();
+    button.removeAttribute('aria-busy');
+    if (active) {
+      const marker = document.createElement('span');
+      marker.dataset.billingProgress = 'true'; marker.textContent = ' \u23f3';
+      marker.setAttribute('aria-hidden', 'true');
+      button.setAttribute('aria-busy', 'true'); button.append(marker);
+    }
+  };
+  const fail = () => { progress(false); setTriggerValue('redirect_error', true); };
   try {
     if (data.failed) {
-      const tab = tabs.get(data.scope);
-      if (tab && !tab.closed) tab.close();
-      tabs.delete(data.scope);
-      return;
+      attempts.delete(data.scope); progress(false); return;
     }
     const storageKey = `vulnscan-stripe-intent:${data.scope}`;
     let intent = sessionStorage.getItem(storageKey);
@@ -41,64 +52,54 @@ export default function ({data, setStateValue, setTriggerValue}) {
       intent = data.rotate || crypto.randomUUID();
       sessionStorage.setItem(storageKey, intent);
     }
-    if (data.known_intent !== intent) {
-      setStateValue('intent', intent);
-    }
+    // Readiness never reruns the panel or disables a purchase control.
+    // Send the stable browser attempt only on an explicit native click.
+    const seen = `vulnscan-stripe-navigation:${data.scope}`;
+    let target;
     if (data.url && data.navigation) {
-      const target = new URL(data.url);
+      target = new URL(data.url);
       if (target.protocol !== 'https:' || target.username || target.password ||
           target.port || !['checkout.stripe.com', 'billing.stripe.com'].includes(target.hostname)) {
         throw new Error('Unapproved destination');
       }
-      const seen = `vulnscan-stripe-navigation:${data.scope}`;
-      if (sessionStorage.getItem(seen) !== data.navigation) {
-        const tab = tabs.get(data.scope);
-        if (!tab || tab.closed) throw new Error('Payment tab unavailable');
-        if (/^cs_[A-Za-z0-9_]{1,252}$/.test(data.checkout || '')) checkoutTabs.set(data.checkout, tab);
-        tab.location.replace(target.href);
-        watchReturn(tab, data.checkout);
-        tab.focus();
-        sessionStorage.setItem(seen, data.navigation);
-      }
     }
-
-    if (!data.button_key) return;
-    const selector = `.st-key-${CSS.escape(data.button_key)}`;
+    const openReady = () => {
+      // Open only the validated hosted page. The authenticated source stays alive.
+      const tab = window.open(target.href, '_blank');
+      if (!tab) { fail(); return false; }
+      tab.opener = null; tabs.set(data.scope, tab);
+      if (/^cs_[A-Za-z0-9_]{1,252}$/.test(data.checkout || '')) checkoutTabs.set(data.checkout, tab);
+      watchReturn(tab, data.checkout);
+      tab.focus(); sessionStorage.setItem(seen, data.navigation);
+      attempts.delete(data.scope); progress(false);
+      setStateValue('navigation_done', data.navigation);
+      return true;
+    };
+    const attempt = attempts.get(data.scope);
+    if (target && sessionStorage.getItem(seen) !== data.navigation && attempt && !attempt.delivered) {
+      attempt.delivered = true;
+      openReady();
+    }
+    if (!selector) return;
     const click = event => {
       const button = event.target.closest?.('button');
       if (!button || button.disabled || !button.closest(selector)) return;
-      let tab = tabs.get(data.scope);
-      // The native button still runs all server checks. No Stripe request here.
-      if (!tab || tab.closed) {
-        tab = window.open('about:blank', '_blank');
-        if (!tab) {
-          event.preventDefault();
-          event.stopImmediatePropagation();
-          fail();
-          return;
-        }
-        tab.opener = null;
-        tabs.set(data.scope, tab);
+      const stop = () => { event.preventDefault(); event.stopImmediatePropagation(); };
+      if (target && sessionStorage.getItem(seen) !== data.navigation) {
+        // A blocked popup or interrupted response retries this SAME Checkout,
+        // synchronously under the new user gesture. No second server operation.
+        stop(); openReady(); return;
       }
-      // Reserve the script-closable tab during the click, but keep the existing
-      // UI visible while the server creates Checkout. No intermediate document.
-      try { window.top.focus(); } catch { /* Browser controls focus. */ }
-      queueMicrotask(() => {
-        if (button.isConnected && !button.querySelector('[data-billing-progress]')) {
-          const progress = document.createElement('span');
-          progress.dataset.billingProgress = 'true';
-          progress.textContent = ' ⏳';
-          progress.setAttribute('aria-hidden', 'true');
-          button.setAttribute('aria-busy', 'true');
-          button.append(progress);
-        }
-      });
+      const previous = attempts.get(data.scope);
+      if (previous && !previous.delivered && Date.now() - previous.started < 120000) {
+        stop(); return;
+      }
+      stop();
+      attempts.set(data.scope, {started: Date.now(), delivered: false});
+      setTriggerValue('purchase', intent);
+      queueMicrotask(() => progress(true));
     };
-    // Capture the actual native click, including keyboard activation. No parent
-    // DOM access and no additional control or second confirmation link.
     document.addEventListener('click', click, true);
     return () => document.removeEventListener('click', click, true);
-  } catch {
-    fail();
-  }
+  } catch { fail(); }
 }
